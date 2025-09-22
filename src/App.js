@@ -162,26 +162,28 @@ function App() {
     const lines = analysis.split('\n');
     let formatted = '';
     let inUserList = false;
+    let foundUserScores = false;
     const isComparing = comparingOutputId === outputId;
     
-    lines.forEach(line => {
+    lines.forEach((line, index) => {
       const trimmedLine = line.trim();
       
       // Look for user score patterns like "User 1 - Overall Score 9/15 - Q1: 3* Q2: 3* Q3: 3* - reason"
-      const userScoreMatch = trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)/i) || 
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/35\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*Q7:\s*(\d+)\*\s*-\s*(.+)/i) || 
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/35\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*Q7:\s*(\d+)\*\s*-\s*(.+)/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/30\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*-\s*(.+)/i) || 
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/30\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*-\s*(.+)/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/25\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*-\s*(.+)/i) || 
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/25\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*-\s*(.+)/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Score\s+(\d+)\*:\s*(.+)/i) || 
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Score\s+(\d+)\*:\s*(.+)/i) ||
-                            trimmedLine.match(/User\s+(\d+)\s*-\s*Score\s+(\d+)\*\s*-\s*(.+)/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Score\s+(\d+)\*\s*-\s*(.+)/i);
+      // Handle both numbered list format (1. **User...) and regular format
+      // Note: Q3 and Q5 may have "Yes" instead of numbers with *
+      const userScoreMatch = trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/15.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+)/i) ||
+                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/15\*\*.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+)/i) ||
+                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/30.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/30.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+)/i) ||
+                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/25.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/25.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+)/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*:\s*(.+)/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*-\s*(.+)/i);
       
       if (userScoreMatch) {
+        foundUserScores = true;
         const [, userNum, overallScore, q1, q2, q3, q4, q5, q6, q7, reason] = userScoreMatch;
         // For 3-question format: reason is at index 6, for 5-question format: reason is at index 8, for 6-question format: reason is at index 9, for 7-question format: reason is at index 10
         const actualReason = q7 ? reason : (q6 ? reason : (q4 && q5 ? reason : (userScoreMatch[6] || reason)));
@@ -189,7 +191,7 @@ function App() {
         const isDisabled = !isSelected && tempSelectedUsers.length >= 3;
         
         // Fix undefined reason issue - show reason if available
-        const reasonText = actualReason ? actualReason.trim() : '';
+        const reasonText = actualReason ? actualReason.trim().replace(/\*\*$/, '') : '';
         
         // Handle new format with overall score and individual question scores
         if (q1 && q2 && q3) {
@@ -211,16 +213,17 @@ function App() {
         } else if (q1 && q2 && q3 && q4 && q5 && q6 && q7) {
           // Handle 7-question format for Graduate client
           const totalScore = parseInt(overallScore);
-          const questionScores = [parseInt(q1), parseInt(q2), parseInt(q3), parseInt(q4), parseInt(q5), parseInt(q6), parseInt(q7)];
-          const avgScore = Math.round(totalScore / 7);
+          // Only Q4, Q6, and Q7 are scored (1-5*), others are Yes/No informational
+          const scoredQuestions = [parseInt(q4), parseInt(q6), parseInt(q7)];
+          const avgScore = Math.round(totalScore / 3); // Only 3 questions are scored
           const stars = '★'.repeat(avgScore) + '☆'.repeat(5 - avgScore);
           
           formatted += `<div class="user-score-item ${isComparing ? 'comparing' : ''}" data-user="${userNum}" data-total-score="${totalScore}" data-q1="${q1}" data-q2="${q2}" data-q3="${q3}" data-q4="${q4}" data-q5="${q5}" data-q6="${q6}" data-q7="${q7}">
             ${isComparing ? `<input type="checkbox" class="user-checkbox-inline" data-user="${userNum}" ${isSelected ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} />` : ''}
             <span class="user-number">User ${userNum}</span>
-            <span class="score score-${getScoreClass(avgScore)}">${stars} (${totalScore}/35)</span>
+            <span class="score score-${getScoreClass(avgScore)}">${stars} (${totalScore}/15)</span>
             ${isComparing ? `<div class="question-breakdown">
-              <span class="q-scores">Q1: ${q1}* Q2: ${q2}* Q3: ${q3}* Q4: ${q4}* Q5: ${q5}* Q6: ${q6}* Q7: ${q7}*</span>
+              <span class="q-scores">Q1: ${q1} Q2: ${q2} Q3: ${q3} Q4: ${q4}* Q5: ${q5} Q6: ${q6}* Q7: ${q7}*</span>
             </div>` : ''}
             <span class="reason">${reasonText || 'No reason provided'}</span>
           </div>`;
@@ -278,6 +281,11 @@ function App() {
         formatted += `<p>${trimmedLine}</p>`;
       }
     });
+    
+    if (!foundUserScores) {
+      console.log('❌ No user scores found in analysis. Raw analysis:', analysis);
+      return `<div class="analysis-error">No individual user scores found in analysis. The AI may have returned a summary instead of individual scores.</div>`;
+    }
     
     return formatted || analysis;
   };
@@ -414,6 +422,26 @@ function App() {
     }
     
     return reasoning || null;
+  };
+
+  const getShortJustification = (userNum) => {
+    if (!currentOutput?.analysis) return null;
+    
+    const lines = currentOutput.analysis.split('\n');
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Look for the user score line with the short justification
+      const userScoreMatch = trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/15\*\*.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+)/i);
+      
+      if (userScoreMatch && parseInt(userScoreMatch[1]) === userNum) {
+        return userScoreMatch[userScoreMatch.length - 1]; // Last group is the reason
+      }
+    }
+    
+    return null;
   };
 
   const processFile = async () => {
@@ -744,21 +772,29 @@ function App() {
                 {getSelectedUsersData().map(({ userNum, data, score, overallScore }) => (
                   <div key={userNum} className="user-comparison-card">
                     <div className="user-card-header">
-                      <h4>User {userNum}</h4>
-                      {overallScore !== null ? (
-                        <div className={`user-score score-${getScoreClass(Math.round(overallScore / (overallScore > 15 ? 5 : 3)))}`}>
-                          {'★'.repeat(Math.round(overallScore / (overallScore > 15 ? 5 : 3))) + '☆'.repeat(5 - Math.round(overallScore / (overallScore > 15 ? 5 : 3)))} ({overallScore}/{overallScore > 15 ? 25 : 15})
-                        </div>
-                      ) : score !== null ? (
-                        <div className={`user-score score-${getScoreClass(score)}`}>
-                          {'★'.repeat(score) + '☆'.repeat(5 - score)} ({score}/5)
-                        </div>
-                      ) : null}
+                      <h4>
+                        User {userNum}
+                        {overallScore !== null ? (
+                          <span className={`user-score-inline score-${getScoreClass(Math.round(overallScore / (overallScore > 15 ? 5 : 3)))}`}>
+                            {'★'.repeat(Math.round(overallScore / (overallScore > 15 ? 5 : 3))) + '☆'.repeat(5 - Math.round(overallScore / (overallScore > 15 ? 5 : 3)))} ({overallScore}/{overallScore > 15 ? 25 : 15})
+                          </span>
+                        ) : score !== null ? (
+                          <span className={`user-score-inline score-${getScoreClass(score)}`}>
+                            {'★'.repeat(score) + '☆'.repeat(5 - score)} ({score}/5)
+                          </span>
+                        ) : null}
+                      </h4>
                     </div>
                     <div className="user-card-content">
+                      {getShortJustification(userNum) && (
+                        <div className="comparison-short-reason">
+                          <h5>Short Justification:</h5>
+                          <p>{getShortJustification(userNum)}</p>
+                        </div>
+                      )}
                       {getDetailedReasoning(userNum) && (
                         <div className="comparison-reasoning">
-                          <h5>AI Analysis:</h5>
+                          <h5>Detailed AI Analysis:</h5>
                           <p>{getDetailedReasoning(userNum)}</p>
                         </div>
                       )}

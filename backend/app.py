@@ -48,7 +48,7 @@ def analyze_csv():
 
         # Determine number of questions based on client
         num_questions = 7 if "Graduate" in client else 3
-        max_score = 35 if num_questions == 7 else 15
+        max_score = 15 if num_questions == 7 else 15  # For 7-question format, only 3 questions are scored (Q4, Q6, Q7)
         
         # Add supporting references if provided
         supporting_text = f"\n\nSupporting References:\n{supporting_references}" if supporting_references else ""
@@ -75,7 +75,12 @@ def analyze_csv():
 
         IMPORTANT: Calculate the OVERALL SCORE as the SUM of all {num_questions} individual question scores (max {max_score} stars).
 
-        For each candidate, provide the format: "User [number] - Overall Score [X]/{max_score} - Q1: [X]* Q2: [X]* Q3: [X]*{' Q4: [X]* Q5: [X]* Q6: [X]* Q7: [X]*' if num_questions == 7 else (' Q4: [X]* Q5: [X]* Q6: [X]*' if num_questions == 6 else '')} - [brief reason]"
+        For each candidate, provide the format: 
+        - For 3-question format: "User [number] - Overall Score [X]/15 - Q1: [X]* Q2: [X]* Q3: [X]* - [brief reason]"
+        - For 6-question format: "User [number] - Overall Score [X]/30 - Q1: [X]* Q2: [X]* Q3: [X]* Q4: [X]* Q5: [X]* Q6: [X]* - [brief reason]"
+        - For 7-question format: "User [number] - Overall Score [X]/15 - Q1: [Yes/No] Q2: [Yes/No] Q3: [Yes/No] Q4: [X]* Q5: [Yes/No] Q6: [X]* Q7: [X]* - [brief reason]"
+        
+        Note: For 7-question format, only Q4, Q6, and Q7 are scored (1-5*), Q1, Q2, Q3, and Q5 are Yes/No informational questions
         
         After the main analysis, provide detailed reasoning for each user in this format:
         "DETAILED REASONING:
