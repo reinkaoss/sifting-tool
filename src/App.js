@@ -158,26 +158,17 @@ function App() {
   const formatAnalysis = (analysis, outputId) => {
     if (!analysis) return '';
     
-    console.log('🔍 Formatting analysis for outputId:', outputId);
-    console.log('🔍 Analysis preview:', analysis.substring(0, 300) + '...');
-    
     // Split by lines and look for user score patterns
     const lines = analysis.split('\n');
     let formatted = '';
     let inUserList = false;
-    let foundUserScores = false;
     const isComparing = comparingOutputId === outputId;
     
     lines.forEach(line => {
       const trimmedLine = line.trim();
       
       // Look for user score patterns like "User 1 - Overall Score 9/15 - Q1: 3* Q2: 3* Q3: 3* - reason"
-      // Handle numbered list format: "1. **User 1 - Overall Score 14/15 - Q1: 5* Q2: 5* Q3: 4* - reason**"
-      const userScoreMatch = trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)\*\*/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/35\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*Q7:\s*(\d+)\*\s*-\s*(.+)\*\*/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/30\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*-\s*(.+)\*\*/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/25\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*-\s*(.+)\*\*/i) ||
-                            trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)/i) || 
+      const userScoreMatch = trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)/i) || 
                             trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/15\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*-\s*(.+)/i) ||
                             trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+(\d+)\/35\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*Q7:\s*(\d+)\*\s*-\s*(.+)/i) || 
                             trimmedLine.match(/User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/35\s*-\s*Q1:\s*(\d+)\*\s*Q2:\s*(\d+)\*\s*Q3:\s*(\d+)\*\s*Q4:\s*(\d+)\*\s*Q5:\s*(\d+)\*\s*Q6:\s*(\d+)\*\s*Q7:\s*(\d+)\*\s*-\s*(.+)/i) ||
@@ -191,7 +182,6 @@ function App() {
                             trimmedLine.match(/\*\*User\s+(\d+)\*\*\s*-\s*Score\s+(\d+)\*\s*-\s*(.+)/i);
       
       if (userScoreMatch) {
-        foundUserScores = true;
         const [, userNum, overallScore, q1, q2, q3, q4, q5, q6, q7, reason] = userScoreMatch;
         // For 3-question format: reason is at index 6, for 5-question format: reason is at index 8, for 6-question format: reason is at index 9, for 7-question format: reason is at index 10
         const actualReason = q7 ? reason : (q6 ? reason : (q4 && q5 ? reason : (userScoreMatch[6] || reason)));
@@ -288,11 +278,6 @@ function App() {
         formatted += `<p>${trimmedLine}</p>`;
       }
     });
-    
-    if (!foundUserScores) {
-      console.log('❌ No user scores found in analysis. Raw analysis:', analysis);
-      return `<div class="analysis-error">No individual user scores found in analysis. The AI may have returned a summary instead of individual scores.</div>`;
-    }
     
     return formatted || analysis;
   };
@@ -447,111 +432,57 @@ function App() {
     addTerminalLog('Processing file with AI analysis...');
     
     try {
-      // Calculate total batches needed
-      const batchSize = 50;
-      const totalBatches = Math.ceil(csvData.length / batchSize);
-      
-      addTerminalLog(`Processing ${csvData.length} applications in ${totalBatches} batches...`);
-      
-      let allAnalyses = [];
-      let currentBatch = 1;
-      
-      // Process each batch sequentially
-      while (currentBatch <= totalBatches) {
-        const progress = ((currentBatch - 1) / totalBatches) * 100;
-        setProcessingProgress(progress);
-        addTerminalLog(`Processing batch ${currentBatch}/${totalBatches}...`);
-        
-        try {
-          console.log(`🚀 Sending batch ${currentBatch} request to backend...`);
-          
-          // Add timeout to prevent hanging
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
-          
-          const response = await fetch('http://localhost:5002/analyze', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              client: selectedClient,
-              jobDescription: jobDescription,
-              supportingReferences: supportingReferences,
-              csvData: csvData,
-              userCount: userCount,
-              batchNumber: currentBatch
-            }),
-            signal: controller.signal
-          });
-          
-          clearTimeout(timeoutId);
-          console.log(`📡 Batch ${currentBatch} response received:`, response.status);
+      // Simulate progress for large files
+      const progressInterval = setInterval(() => {
+        setProcessingProgress(prev => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 10;
+        });
+      }, 500);
 
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
+      // Call the backend API for AI analysis
+      const response = await fetch('http://localhost:5000/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          client: selectedClient,
+          jobDescription: jobDescription,
+          supportingReferences: supportingReferences,
+          csvData: csvData, // Send ALL candidates, not just samples
+          userCount: userCount
+        })
+      });
 
-          const result = await response.json();
-          
-          if (!result.success) {
-            throw new Error(result.error || `Batch ${currentBatch} failed`);
-          }
+      clearInterval(progressInterval);
+      setProcessingProgress(100);
 
-          console.log(`🔍 Batch ${currentBatch} raw analysis (first 500 chars):`, result.analysis.substring(0, 500));
-          allAnalyses.push(result.analysis);
-          addTerminalLog(`Batch ${currentBatch} completed (${result.processedCount}/${result.totalCount} applications)`);
-          
-          // Combine all analyses and format them properly
-          const combinedAnalysis = allAnalyses.join('\n\n');
-          
-          // If this is the first batch, create the output immediately
-          if (currentBatch === 1) {
-            const newOutput = {
-              id: Date.now(),
-              client: selectedClient,
-              fileName: uploadedFile.name,
-              description: jobDescription,
-              userCount: userCount,
-              status: 'AI Analysis In Progress',
-              timestamp: new Date().toLocaleTimeString(),
-              analysis: combinedAnalysis,
-              csvData: csvData,
-              isIncremental: true,
-              currentBatch: currentBatch,
-              totalBatches: totalBatches
-            };
-            
-            setOutputs(prev => [...prev, newOutput]);
-          } else {
-            // Update the existing output with combined analysis
-            setOutputs(prev => {
-              const updated = [...prev];
-              const lastOutput = updated[updated.length - 1];
-              if (lastOutput && lastOutput.isIncremental) {
-                lastOutput.analysis = combinedAnalysis;
-                lastOutput.currentBatch = currentBatch;
-                lastOutput.status = currentBatch === totalBatches ? 'AI Analysis Completed' : 'AI Analysis In Progress';
-              }
-              return updated;
-            });
-          }
-          
-          currentBatch++;
-          
-        } catch (error) {
-          if (error.name === 'AbortError') {
-            addTerminalLog(`Batch ${currentBatch} timed out after 2 minutes`);
-          } else {
-            addTerminalLog(`Error processing batch ${currentBatch}: ${error.message}`);
-          }
-          // Continue with next batch even if one fails
-          currentBatch++;
-        }
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
       }
 
-      setProcessingProgress(100);
-      addTerminalLog(`AI analysis completed - ${csvData.length} applications processed in ${totalBatches} batches`);
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Analysis failed');
+      }
+
+      addTerminalLog('AI analysis completed');
+      
+      const newOutput = {
+        id: Date.now(),
+        client: selectedClient,
+        fileName: uploadedFile.name,
+        description: jobDescription,
+        userCount: userCount,
+        status: 'AI Analysis Completed',
+        timestamp: new Date().toLocaleTimeString(),
+        analysis: result.analysis
+      };
+      
+      setOutputs(prev => [...prev, newOutput]);
+      addTerminalLog(`File processed successfully for ${selectedClient} - ${userCount} applications analyzed`);
       
     } catch (error) {
       addTerminalLog(`Error during processing: ${error.message}`);
