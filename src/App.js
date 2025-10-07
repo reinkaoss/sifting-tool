@@ -168,23 +168,38 @@ function App() {
     lines.forEach((line, index) => {
       const trimmedLine = line.trim();
       
-      // Look for user score patterns like "User 1 - Overall Score 9/15 - Q1: 3* Q2: 3* Q3: 3* - reason"
-      // Handle both numbered list format (1. **User...) and regular format
-      // Note: Q3 and Q5 may have "Yes" instead of numbers with *
-      const userScoreMatch = trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/15.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+)/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/15\*\*.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+?)(?:\*\*)?$/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+)/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/30.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/30.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+)/i) ||
-                            trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/25.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/25.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+)/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*:\s*(.+)/i) ||
-                            trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*-\s*(.+)/i);
+      // Look for user score patterns - make regex more flexible to handle various formats
+      // Handle numbered list format (1. **User...), regular format, and various markdown styles
+      const userScoreMatch = 
+        // 7-question format with square brackets (Graduate Scheme)
+        trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/15\*\*.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+        trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+)/i) ||
+        // 7-question format without ** around User and Score
+        trimmedLine.match(/\d+\.\s*User\s+(\d+)\s*-\s*Overall\s+Score\s+(\d+)\/15.*Q1:\s*\[(\w+)\].*Q2:\s*\[(\w+)\].*Q3:\s*\[(\w+)\].*Q4:\s*\[(\d+)\]\*.*Q5:\s*\[(\w+)\].*Q6:\s*\[(\d+)\]\*.*Q7:\s*\[(\d+)\]\*.*-\s*(.+)/i) ||
+        // 6-question format
+        trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/30\*\*.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+        trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/30.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*Q6:\s*(\d+)\*.*-\s*(.+)/i) ||
+        // 5-question format
+        trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/25\*\*.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+        trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/25.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*Q4:\s*(\d+)\*.*Q5:\s*(\d+)\*.*-\s*(.+)/i) ||
+        // 3-question format
+        trimmedLine.match(/\d+\.\s*\*\*User\s+(\d+)\*\*\s*-\s*Overall\s+Score\s+\*\*(\d+)\/15\*\*.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+?)(?:\*\*)?$/i) ||
+        trimmedLine.match(/.*User\s+(\d+).*Overall\s+Score\s+(\d+)\/15.*Q1:\s*(\d+)\*.*Q2:\s*(\d+)\*.*Q3:\s*(\d+)\*.*-\s*(.+)/i) ||
+        // Fallback patterns for various formats
+        trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*:\s*(.+)/i) ||
+        trimmedLine.match(/.*User\s+(\d+).*Score\s+(\d+)\*.*-\s*(.+)/i) ||
+        // Very flexible pattern to catch any User X format
+        trimmedLine.match(/.*User\s+(\d+).*?(\d+)\/(\d+).*?-\s*(.+)/i);
       
       if (userScoreMatch) {
         foundUserScores = true;
         const [, userNum, overallScore, q1, q2, q3, q4, q5, q6, q7, reason] = userScoreMatch;
+        
+        // Debug logging for large datasets
+        if (parseInt(userNum) <= 10) {
+          console.log(`Parsed User ${userNum}:`, { overallScore, q1, q2, q3, q4, q5, q6, q7, reason });
+        }
+        
         // For 3-question format: reason is at index 6, for 5-question format: reason is at index 8, for 6-question format: reason is at index 9, for 7-question format: reason is at index 10
         const actualReason = q7 ? reason : (q6 ? reason : (q4 && q5 ? reason : (userScoreMatch[6] || reason)));
         const isSelected = tempSelectedUsers.includes(parseInt(userNum));
@@ -193,24 +208,8 @@ function App() {
         // Fix undefined reason issue - show reason if available
         const reasonText = actualReason ? actualReason.trim().replace(/\*\*$/, '') : '';
         
-        // Handle new format with overall score and individual question scores
-        if (q1 && q2 && q3) {
-          const totalScore = parseInt(overallScore);
-          const questionScores = [parseInt(q1), parseInt(q2), parseInt(q3)];
-          const avgScore = Math.round(totalScore / 3);
-          const stars = '★'.repeat(avgScore) + '☆'.repeat(5 - avgScore);
-          const maxScore = totalScore > 30 ? 35 : (totalScore > 25 ? 30 : (totalScore > 15 ? 25 : 15)); // Handle 3, 5, 6, and 7 question formats
-          
-          formatted += `<div class="user-score-item ${isComparing ? 'comparing' : ''}" data-user="${userNum}" data-total-score="${totalScore}" data-q1="${q1}" data-q2="${q2}" data-q3="${q3}">
-            ${isComparing ? `<input type="checkbox" class="user-checkbox-inline" data-user="${userNum}" ${isSelected ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} />` : ''}
-            <span class="user-number">User ${userNum}</span>
-            <span class="score score-${getScoreClass(avgScore)}">${stars} (${totalScore}/${maxScore})</span>
-            ${isComparing ? `<div class="question-breakdown">
-              <span class="q-scores">Q1: ${q1}* Q2: ${q2}* Q3: ${q3}*</span>
-            </div>` : ''}
-            <span class="reason">${reasonText || 'No reason provided'}</span>
-          </div>`;
-        } else if (q1 && q2 && q3 && q4 && q5 && q6 && q7) {
+        // Handle 7-question format (Graduate Scheme) - most common case
+        if (q1 && q2 && q3 && q4 && q5 && q6 && q7) {
           // Handle 7-question format for Graduate client
           const totalScore = parseInt(overallScore);
           // Only Q4, Q6, and Q7 are scored (1-5*), others are Yes/No informational
@@ -259,6 +258,22 @@ function App() {
             </div>` : ''}
             <span class="reason">${reasonText || 'No reason provided'}</span>
           </div>`;
+        } else if (q1 && q2 && q3) {
+          const totalScore = parseInt(overallScore);
+          const questionScores = [parseInt(q1), parseInt(q2), parseInt(q3)];
+          const avgScore = Math.round(totalScore / 3);
+          const stars = '★'.repeat(avgScore) + '☆'.repeat(5 - avgScore);
+          const maxScore = totalScore > 30 ? 35 : (totalScore > 25 ? 30 : (totalScore > 15 ? 25 : 15)); // Handle 3, 5, 6, and 7 question formats
+          
+          formatted += `<div class="user-score-item ${isComparing ? 'comparing' : ''}" data-user="${userNum}" data-total-score="${totalScore}" data-q1="${q1}" data-q2="${q2}" data-q3="${q3}">
+            ${isComparing ? `<input type="checkbox" class="user-checkbox-inline" data-user="${userNum}" ${isSelected ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} />` : ''}
+            <span class="user-number">User ${userNum}</span>
+            <span class="score score-${getScoreClass(avgScore)}">${stars} (${totalScore}/${maxScore})</span>
+            ${isComparing ? `<div class="question-breakdown">
+              <span class="q-scores">Q1: ${q1}* Q2: ${q2}* Q3: ${q3}*</span>
+            </div>` : ''}
+            <span class="reason">${reasonText || 'No reason provided'}</span>
+          </div>`;
         } else {
           // Handle old format with single score
           const [, , singleScore, , , , , , singleReason] = userScoreMatch;
@@ -284,8 +299,11 @@ function App() {
     
     if (!foundUserScores) {
       console.log('❌ No user scores found in analysis. Raw analysis:', analysis);
+      console.log('First 10 lines of analysis:', analysis.split('\n').slice(0, 10));
       return `<div class="analysis-error">No individual user scores found in analysis. The AI may have returned a summary instead of individual scores.</div>`;
     }
+    
+    console.log(`✅ Successfully parsed ${formatted.split('user-score-item').length - 1} user scores`);
     
     return formatted || analysis;
   };
