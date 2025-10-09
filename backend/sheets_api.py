@@ -20,18 +20,53 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 
 def get_spreadsheet(sheet_id=None):
     """Get authenticated spreadsheet connection"""
-    creds = Credentials.from_service_account_file('google_credentials.json', scopes=SCOPES)
+    # Try to get credentials from environment (Vercel/Production)
+    creds_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
+    if creds_json:
+        try:
+            # Parse JSON from environment variable
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            print("Using Google credentials from environment variable")
+        except Exception as e:
+            print(f"Error parsing credentials from environment: {e}")
+            raise
+    else:
+        # Use local file (development)
+        creds = Credentials.from_service_account_file('google_credentials.json', scopes=SCOPES)
+        print("Using Google credentials from local file")
+    
     client = gspread.authorize(creds)
     spreadsheet_id = sheet_id or DEFAULT_SPREADSHEET_ID
     return client.open_by_key(spreadsheet_id)
 
-def get_unanalyzed_applications(sheet_id=None):
+def get_unanalyzed_applications(sheet_id=None, gid=None):
     """
     Get all applications that don't have analysis yet (column V is empty)
     Returns list of applications with row numbers
     """
     spreadsheet = get_spreadsheet(sheet_id)
-    worksheet = spreadsheet.get_worksheet(0)
+    
+    # Get worksheet by gid if provided, otherwise use first sheet
+    if gid:
+        try:
+            # Find worksheet by gid
+            worksheet = None
+            for sheet in spreadsheet.worksheets():
+                if str(sheet.id) == str(gid):
+                    worksheet = sheet
+                    break
+            if not worksheet:
+                print(f"Warning: Worksheet with gid={gid} not found, using first sheet")
+                worksheet = spreadsheet.get_worksheet(0)
+        except Exception as e:
+            print(f"Error finding worksheet by gid: {e}, using first sheet")
+            worksheet = spreadsheet.get_worksheet(0)
+    else:
+        worksheet = spreadsheet.get_worksheet(0)
+    
+    print(f"Using worksheet: {worksheet.title} (id: {worksheet.id})")
     
     all_values = worksheet.get_all_values()
     headers = all_values[0]
@@ -66,12 +101,30 @@ def get_unanalyzed_applications(sheet_id=None):
     
     return unanalyzed
 
-def analyze_and_write_to_sheet(selected_rows, client, job_description, supporting_references='', sheet_id=None):
+def analyze_and_write_to_sheet(selected_rows, client, job_description, supporting_references='', sheet_id=None, gid=None):
     """
     Analyze selected applications and write results back to the spreadsheet
     """
     spreadsheet = get_spreadsheet(sheet_id)
-    worksheet = spreadsheet.get_worksheet(0)
+    
+    # Get worksheet by gid if provided, otherwise use first sheet
+    if gid:
+        try:
+            worksheet = None
+            for sheet in spreadsheet.worksheets():
+                if str(sheet.id) == str(gid):
+                    worksheet = sheet
+                    break
+            if not worksheet:
+                print(f"Warning: Worksheet with gid={gid} not found, using first sheet")
+                worksheet = spreadsheet.get_worksheet(0)
+        except Exception as e:
+            print(f"Error finding worksheet by gid: {e}, using first sheet")
+            worksheet = spreadsheet.get_worksheet(0)
+    else:
+        worksheet = spreadsheet.get_worksheet(0)
+    
+    print(f"Writing to worksheet: {worksheet.title} (id: {worksheet.id})")
     
     all_values = worksheet.get_all_values()
     
@@ -81,6 +134,7 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
         row = all_values[row_num - 1]  # Convert to 0-indexed
         app = {
             'row_number': row_num,
+            'sheet_id': sheet_id,
             'first_name': row[2] if len(row) > 2 else '',
             'surname': row[3] if len(row) > 3 else '',
             'university': row[7] if len(row) > 7 else '',
@@ -167,20 +221,164 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
         'failed': failed_rows
     }
 
-def analyze_applications_ai(applications, client, job_description, supporting_references=''):
-    """Analyze applications using OpenAI"""
-    
-    # Load client criteria
-    client_criteria = None
+def get_clients_list(sheet_id=None):
+    """Get list of all clients from the Clients tab"""
+    try:
+        spreadsheet = get_spreadsheet(sheet_id)
+        print(f"Getting clients from spreadsheet: {spreadsheet.title}")
+        try:
+            clients_worksheet = spreadsheet.worksheet('Clients')
+            print(f"Found 'Clients' worksheet")
+        except Exception as e:
+            print(f"'Clients' tab not found: {e}")
+            # Fallback to JSON if Clients tab doesn't exist
+            try:
+                with open('../ultils/clients.json', 'r') as f:
+                    clients_data = json.load(f)
+                    return [c['name'] for c in clients_data['clients']]
+            except:
+                return []
+        
+        all_values = clients_worksheet.get_all_values()
+        print(f"Clients sheet has {len(all_values)} rows")
+        print(f"Headers: {all_values[0] if all_values else 'None'}")
+        
+        if not all_values or len(all_values) < 2:
+            print("No clients found (need at least header + 1 row)")
+            return []
+        
+        # First column should be client names, skip header
+        clients = [row[0] for row in all_values[1:] if row and row[0]]
+        print(f"Extracted clients: {clients}")
+        return clients
+    except Exception as e:
+        print(f"Error getting clients list: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def add_client_to_sheet(client_name, criteria_dict, sheet_id=None):
+    """Add a new client with criteria to the Clients tab"""
+    try:
+        spreadsheet = get_spreadsheet(sheet_id)
+        try:
+            clients_worksheet = spreadsheet.worksheet('Clients')
+        except:
+            # Create the Clients worksheet if it doesn't exist
+            clients_worksheet = spreadsheet.add_worksheet(title='Clients', rows=100, cols=20)
+            # Add headers
+            headers = ['Client Name', 'Question 1', 'Question 2', 'Question 3', 'Question 4', 
+                       'Question 5', 'Question 6', 'Question 7']
+            clients_worksheet.update(values=[headers], range_name='A1', value_input_option='USER_ENTERED')
+        
+        # Get current data to find next row
+        all_values = clients_worksheet.get_all_values()
+        next_row = len(all_values) + 1
+        
+        # Prepare row data
+        headers = all_values[0] if all_values else ['Client Name']
+        row_data = [client_name]
+        
+        # Add criteria in order of headers
+        for header in headers[1:]:  # Skip 'Client Name'
+            row_data.append(criteria_dict.get(header, ''))
+        
+        # Write the new client
+        clients_worksheet.update(
+            values=[row_data], 
+            range_name=f'A{next_row}', 
+            value_input_option='USER_ENTERED'
+        )
+        
+        return {'success': True, 'message': f'Client "{client_name}" added successfully'}
+    except Exception as e:
+        print(f"Error adding client to sheet: {e}")
+        return {'error': str(e)}
+
+def delete_client_from_sheet(client_name, sheet_id=None):
+    """Delete a client from the Clients tab"""
+    try:
+        spreadsheet = get_spreadsheet(sheet_id)
+        try:
+            clients_worksheet = spreadsheet.worksheet('Clients')
+        except:
+            return {'error': 'Clients tab not found'}
+        
+        all_values = clients_worksheet.get_all_values()
+        if not all_values or len(all_values) < 2:
+            return {'error': 'No clients found'}
+        
+        # Find the row with this client
+        row_to_delete = None
+        for idx, row in enumerate(all_values[1:], start=2):  # Start from row 2 (skip header)
+            if row[0] == client_name:
+                row_to_delete = idx
+                break
+        
+        if not row_to_delete:
+            return {'error': f'Client "{client_name}" not found'}
+        
+        # Delete the row
+        clients_worksheet.delete_rows(row_to_delete)
+        print(f"Deleted client '{client_name}' from row {row_to_delete}")
+        
+        return {'success': True, 'message': f'Client "{client_name}" deleted successfully'}
+    except Exception as e:
+        print(f"Error deleting client from sheet: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'error': str(e)}
+
+def get_client_criteria_from_sheet(client_name, sheet_id=None):
+    """Get client criteria from the Clients tab in Google Sheets"""
+    try:
+        spreadsheet = get_spreadsheet(sheet_id)
+        # Try to get the Clients worksheet
+        try:
+            clients_worksheet = spreadsheet.worksheet('Clients')
+        except:
+            print("Warning: 'Clients' tab not found, falling back to JSON")
+            return get_client_criteria_from_json(client_name)
+        
+        all_values = clients_worksheet.get_all_values()
+        if not all_values:
+            return None
+        
+        headers = all_values[0]
+        
+        # Find the row for this client
+        for row in all_values[1:]:
+            if row[0] == client_name:  # Assuming first column is Client Name
+                criteria = {}
+                for i, header in enumerate(headers[1:], start=1):  # Skip first column (Client Name)
+                    if i < len(row) and row[i]:
+                        criteria[header] = row[i]
+                return criteria
+        
+        print(f"Warning: Client '{client_name}' not found in Clients tab")
+        return None
+    except Exception as e:
+        print(f"Error reading from Clients sheet: {e}")
+        return get_client_criteria_from_json(client_name)
+
+def get_client_criteria_from_json(client_name):
+    """Fallback: Load client criteria from JSON file"""
     try:
         with open('../ultils/clients.json', 'r') as f:
             clients_data = json.load(f)
             for c in clients_data['clients']:
-                if c['name'] == client:
-                    client_criteria = c.get('Criteria', {})
-                    break
+                if c['name'] == client_name:
+                    return c.get('Criteria', {})
     except Exception as e:
-        print(f"Warning: Could not load client criteria: {e}")
+        print(f"Warning: Could not load client criteria from JSON: {e}")
+    return None
+
+def analyze_applications_ai(applications, client, job_description, supporting_references=''):
+    """Analyze applications using OpenAI"""
+    
+    # Load client criteria from Google Sheets (with JSON fallback)
+    sheet_id = applications[0].get('sheet_id') if applications else None
+    client_criteria = get_client_criteria_from_sheet(client, sheet_id)
     
     criteria_text = ""
     if isinstance(client_criteria, dict):

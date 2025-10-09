@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import './App.css';
 
+// Use environment variable for API URL, fallback to localhost for development
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
 function App() {
   const [selectedClient, setSelectedClient] = useState('');
   const [jobDescription, setJobDescription] = useState('');
@@ -14,14 +17,19 @@ function App() {
   const [failedApplications, setFailedApplications] = useState([]);
   const [showFailedModal, setShowFailedModal] = useState(false);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('https://docs.google.com/spreadsheets/d/1jDJDQXPoZE6NTAqfTaCILv8ULXpM_vl5WeiEVSplChU/edit?gid=0#gid=0');
-
-  const clients = [
-    'EDF Trading - Internship',
-    'EDF Trading - Graduate Scheme', 
-    'Client C',
-    'Client D',
-    'Client E'
-  ];
+  const [clients, setClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientCriteria, setNewClientCriteria] = useState({
+    'Question 1': '',
+    'Question 2': '',
+    'Question 3': '',
+    'Question 4': '',
+    'Question 5': '',
+    'Question 6': '',
+    'Question 7': ''
+  });
 
   const addTerminalLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -47,29 +55,76 @@ function App() {
     return match ? match[1] : null;
   };
 
+  const extractGid = (url) => {
+    const match = url.match(/[#&]gid=([0-9]+)/);
+    return match ? match[1] : '0'; // Default to first sheet (gid=0)
+  };
+
+  const loadClients = async () => {
+    const sheetId = extractSheetId(spreadsheetUrl);
+    if (!sheetId) {
+      addTerminalLog('Error: Invalid spreadsheet URL for loading clients');
+      return;
+    }
+
+    setLoadingClients(true);
+    addTerminalLog('Loading clients from Google Sheets...');
+    try {
+      const response = await fetch(`${API_URL}/clients?sheetId=${sheetId}`);
+      const result = await response.json();
+      
+      console.log('Clients response:', result); // Debug log
+      
+      if (result.success) {
+        setClients(result.clients);
+        addTerminalLog(`✅ Loaded ${result.clients.length} clients: ${result.clients.join(', ')}`);
+        } else {
+        addTerminalLog('Error loading clients: ' + result.error);
+      }
+    } catch (error) {
+      addTerminalLog(`Error loading clients: ${error.message}`);
+      console.error('Client loading error:', error);
+    } finally {
+      setLoadingClients(false);
+    }
+  };
+
   const loadFromGoogleSheets = async () => {
     const sheetId = extractSheetId(spreadsheetUrl);
+    const gid = extractGid(spreadsheetUrl);
+    
     if (!sheetId) {
       addTerminalLog('Error: Invalid spreadsheet URL');
       return;
     }
 
+    // Clear previous data first
+    setSheetApplications([]);
+    setSelectedSheetRows([]);
     setLoadingSheets(true);
-    addTerminalLog('Loading unanalyzed applications from Google Sheets...');
+    addTerminalLog(`Loading unanalyzed applications from Google Sheets (tab gid=${gid})...`);
     
     try {
-      const response = await fetch(`http://localhost:5000/sheets/unanalyzed?sheetId=${sheetId}`);
+      // Add cache busting timestamp and gid
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${API_URL}/sheets/unanalyzed?sheetId=${sheetId}&gid=${gid}&_t=${timestamp}`, {
+        cache: 'no-store'
+      });
       const result = await response.json();
+      
+      console.log('Loaded applications:', result); // Debug log
       
       if (result.success) {
         setSheetApplications(result.applications);
-        setSelectedSheetRows([]);
-        addTerminalLog(`Loaded ${result.count} unanalyzed applications from Google Sheets`);
+        addTerminalLog(`✅ Loaded ${result.count} unanalyzed applications from Google Sheets`);
+        // Also load clients when loading sheets
+        await loadClients();
       } else {
         addTerminalLog('Error loading from Google Sheets: ' + result.error);
       }
     } catch (error) {
       addTerminalLog(`Error loading from Google Sheets: ${error.message}`);
+      console.error('Loading error:', error);
     } finally {
       setLoadingSheets(false);
     }
@@ -90,6 +145,101 @@ function App() {
     addTerminalLog(`Retrying ${failedRows.length} failed applications...`);
   };
 
+  const addNewClient = async () => {
+    if (!newClientName.trim()) {
+      addTerminalLog('Error: Client name is required');
+      return;
+    }
+
+    const sheetId = extractSheetId(spreadsheetUrl);
+    if (!sheetId) {
+      addTerminalLog('Error: Invalid spreadsheet URL');
+      return;
+    }
+
+    try {
+      addTerminalLog(`Adding new client: ${newClientName}...`);
+      const response = await fetch(`${API_URL}/clients`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientName: newClientName,
+          criteria: newClientCriteria,
+          sheetId: sheetId
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        addTerminalLog(`✅ Client "${newClientName}" added successfully`);
+        setShowAddClientModal(false);
+        setNewClientName('');
+        setNewClientCriteria({
+          'Question 1': '',
+          'Question 2': '',
+          'Question 3': '',
+          'Question 4': '',
+          'Question 5': '',
+          'Question 6': '',
+          'Question 7': ''
+        });
+        // Reload clients
+        await loadClients();
+      } else {
+        addTerminalLog(`Error adding client: ${result.error}`);
+      }
+    } catch (error) {
+      addTerminalLog(`Error adding client: ${error.message}`);
+    }
+  };
+
+  const deleteClient = async () => {
+    if (!selectedClient) {
+      addTerminalLog('Error: Please select a client to delete');
+      return;
+    }
+
+    const sheetId = extractSheetId(spreadsheetUrl);
+    if (!sheetId) {
+      addTerminalLog('Error: Invalid spreadsheet URL');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete client "${selectedClient}"?`)) {
+      return;
+    }
+
+    try {
+      addTerminalLog(`Deleting client: ${selectedClient}...`);
+      const response = await fetch(`${API_URL}/clients`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientName: selectedClient,
+          sheetId: sheetId
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        addTerminalLog(`✅ Client "${selectedClient}" deleted successfully`);
+        setSelectedClient('');
+        // Reload clients
+        await loadClients();
+      } else {
+        addTerminalLog(`Error deleting client: ${result.error}`);
+      }
+    } catch (error) {
+      addTerminalLog(`Error deleting client: ${error.message}`);
+    }
+  };
+
   const analyzeSelectedSheets = async () => {
     if (selectedSheetRows.length === 0) {
       addTerminalLog('Error: Please select at least one application');
@@ -102,6 +252,8 @@ function App() {
     }
 
     const sheetId = extractSheetId(spreadsheetUrl);
+    const gid = extractGid(spreadsheetUrl);
+    
     if (!sheetId) {
       addTerminalLog('Error: Invalid spreadsheet URL');
       return;
@@ -119,7 +271,7 @@ function App() {
         });
       }, 500);
 
-      const response = await fetch('http://localhost:5000/sheets/analyze', {
+      const response = await fetch(`${API_URL}/sheets/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -129,7 +281,8 @@ function App() {
           client: selectedClient,
           jobDescription: jobDescription,
           supportingReferences: supportingReferences,
-          sheetId: sheetId
+          sheetId: sheetId,
+          gid: gid
         })
       });
 
@@ -219,7 +372,7 @@ function App() {
               </div>
               {sheetApplications.map(app => (
                 <div key={app.row_number} style={{display: 'flex', alignItems: 'center', padding: '8px', borderBottom: '1px solid #eee', cursor: 'pointer'}} onClick={() => toggleSheetRowSelection(app.row_number)}>
-                  <input 
+              <input
                     type="checkbox" 
                     checked={selectedSheetRows.includes(app.row_number)}
                     onChange={() => toggleSheetRowSelection(app.row_number)}
@@ -231,8 +384,8 @@ function App() {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+              </div>
+            )}
         </div>
 
         {/* Second Column - Client & Job Description */}
@@ -243,19 +396,44 @@ function App() {
           <div className="form-section">
             <div className="form-group">
               <label htmlFor="client-select">Select Client:</label>
-              <select
-                id="client-select"
-                value={selectedClient}
-                onChange={handleClientChange}
-                className="client-dropdown"
+              <div style={{display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px'}}>
+                <select
+                  id="client-select"
+                  value={selectedClient}
+                  onChange={handleClientChange}
+                  className="client-dropdown"
+                  style={{flex: 1}}
+                >
+                  <option value="">Choose a client...</option>
+                  {clients.map(client => (
+                    <option key={client} value={client}>{client}</option>
+                  ))}
+                </select>
+                <button 
+                  onClick={() => setShowAddClientModal(true)}
+                  style={{padding: '8px 12px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', whiteSpace: 'nowrap'}}
+                  title="Add new client"
+                >
+                  + Add
+                </button>
+                <button 
+                  onClick={deleteClient}
+                  disabled={!selectedClient}
+                  style={{padding: '8px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: selectedClient ? 1 : 0.5}}
+                  title="Delete selected client"
+                >
+                  🗑️
+                </button>
+              </div>
+              <button 
+                onClick={loadClients}
+                disabled={loadingClients}
+                style={{width: '100%', padding: '8px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px'}}
               >
-                <option value="">Choose a client...</option>
-                {clients.map(client => (
-                  <option key={client} value={client}>{client}</option>
-                ))}
-              </select>
+                {loadingClients ? '⏳ Loading Clients...' : '🔄 Load Clients from Sheet'}
+              </button>
             </div>
-            
+
             <div className="form-group">
               <label htmlFor="job-description">Job Description:</label>
               <textarea
@@ -356,6 +534,63 @@ function App() {
                   Retry Failed ({failedApplications.length})
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Client Modal */}
+      {showAddClientModal && (
+        <div className="modal-overlay" onClick={() => setShowAddClientModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '700px', maxHeight: '80vh', overflowY: 'auto'}}>
+            <div className="modal-header">
+              <h3>➕ Add New Client</h3>
+              <button className="close-button" onClick={() => setShowAddClientModal(false)}>×</button>
+            </div>
+            
+            <div className="modal-body">
+              <div style={{marginBottom: '20px'}}>
+                <label style={{display: 'block', fontWeight: 'bold', marginBottom: '8px'}}>Client Name:</label>
+                <input
+                  type="text"
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  placeholder="e.g., EDF Trading - Graduate Scheme"
+                  style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '14px'}}
+                />
+                  </div>
+
+              <div style={{marginBottom: '20px'}}>
+                <h4 style={{marginBottom: '10px'}}>Scoring Criteria:</h4>
+                {Object.keys(newClientCriteria).map((questionKey) => (
+                  <div key={questionKey} style={{marginBottom: '15px'}}>
+                    <label style={{display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px'}}>{questionKey}:</label>
+                    <textarea
+                      value={newClientCriteria[questionKey]}
+                      onChange={(e) => setNewClientCriteria({...newClientCriteria, [questionKey]: e.target.value})}
+                      placeholder={`Enter criteria for ${questionKey}...`}
+                      rows="4"
+                      style={{width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace'}}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end'}}>
+                <button 
+                  onClick={() => setShowAddClientModal(false)}
+                  style={{padding: '10px 20px', backgroundColor: '#ccc', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer'}}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={addNewClient}
+                  disabled={!newClientName.trim()}
+                  style={{padding: '10px 20px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: newClientName.trim() ? 1 : 0.5}}
+                >
+                  Add Client
+                </button>
+                </div>
             </div>
           </div>
         </div>

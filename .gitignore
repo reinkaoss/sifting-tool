@@ -1,4 +1,18 @@
 node_modules
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+*.env
+
 # Ignore local GCP creds
 backend/google_credentials.json
+
+# Build directories
+build/
+dist/
+
+# Vercel
+.vercel

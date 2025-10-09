@@ -403,7 +403,9 @@ def get_unanalyzed():
     try:
         from sheets_api import get_unanalyzed_applications
         sheet_id = request.args.get('sheetId')
-        applications = get_unanalyzed_applications(sheet_id)
+        gid = request.args.get('gid')
+        print(f"Fetching unanalyzed applications from sheetId={sheet_id}, gid={gid}")
+        applications = get_unanalyzed_applications(sheet_id, gid)
         return jsonify({
             'success': True,
             'count': len(applications),
@@ -427,11 +429,13 @@ def analyze_sheets():
         job_description = data.get('jobDescription')
         supporting_references = data.get('supportingReferences', '')
         sheet_id = data.get('sheetId')
+        gid = data.get('gid')
         
         if not all([selected_rows, client, job_description]):
             return jsonify({'error': 'Missing required fields'}), 400
         
-        result = analyze_and_write_to_sheet(selected_rows, client, job_description, supporting_references, sheet_id)
+        print(f"Analyzing applications for sheetId={sheet_id}, gid={gid}")
+        result = analyze_and_write_to_sheet(selected_rows, client, job_description, supporting_references, sheet_id, gid)
         
         if 'error' in result:
             return jsonify(result), 500
@@ -444,10 +448,79 @@ def analyze_sheets():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/clients', methods=['GET'])
+def get_clients():
+    """Get list of all clients"""
+    try:
+        from sheets_api import get_clients_list
+        sheet_id = request.args.get('sheetId')
+        clients = get_clients_list(sheet_id)
+        return jsonify({
+            'success': True,
+            'clients': clients
+        }), 200
+    except Exception as e:
+        print(f"Error getting clients: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/clients', methods=['POST'])
+def add_client():
+    """Add a new client with criteria"""
+    try:
+        from sheets_api import add_client_to_sheet
+        
+        data = request.json
+        client_name = data.get('clientName')
+        criteria = data.get('criteria', {})
+        sheet_id = data.get('sheetId')
+        
+        if not client_name:
+            return jsonify({'error': 'Client name is required'}), 400
+        
+        result = add_client_to_sheet(client_name, criteria, sheet_id)
+        
+        if 'error' in result:
+            return jsonify(result), 500
+        
+        return jsonify(result), 200
+    except Exception as e:
+        print(f"Error adding client: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/clients', methods=['DELETE'])
+def delete_client():
+    """Delete a client"""
+    try:
+        from sheets_api import delete_client_from_sheet
+        
+        data = request.json
+        client_name = data.get('clientName')
+        sheet_id = data.get('sheetId')
+        
+        if not client_name:
+            return jsonify({'error': 'Client name is required'}), 400
+        
+        result = delete_client_from_sheet(client_name, sheet_id)
+        
+        if 'error' in result:
+            return jsonify(result), 500
+        
+        return jsonify(result), 200
+    except Exception as e:
+        print(f"Error deleting client: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'OK'})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
+# For Vercel serverless deployment
+handler = app
 
