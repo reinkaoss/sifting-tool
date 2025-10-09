@@ -54,3 +54,23 @@ npm start
 - `npm start` - Run both frontend and backend
 - `npm run frontend` - Run only React frontend (port 3003)
 - `npm run backend` - Run only Flask backend
+
+## Google Sheets Integration
+
+The application can automatically analyze job applications from Google Sheets:
+
+- **Read** applications from your Google Sheet
+- **Analyze** using AI with detailed scoring
+- **Write** results to a new "AI Analysis" tab with scores and reasoning
+
+### Quick Start
+
+1. Set up Google Cloud service account (see `GOOGLE_SHEETS_SETUP.md`)
+2. Share your spreadsheet with the service account
+3. Run the analyzer:
+   ```bash
+   cd backend
+   python3 sheets_processor.py
+   ```
+
+For detailed setup instructions, see `GOOGLE_SHEETS_SETUP.md`
