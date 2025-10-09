@@ -10,24 +10,13 @@
     },
     {
       "src": "backend/app.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "15mb"
-      }
+      "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
       "dest": "backend/app.py"
-    },
-    {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/(.*\\.(js|css|ico|png|jpg|jpeg|svg|gif))",
-      "dest": "/$1"
     },
     {
       "src": "/(.*)",
