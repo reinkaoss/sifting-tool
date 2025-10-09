@@ -475,7 +475,12 @@ def extract_scores_for_row(analysis, row_number, all_values):
                     in_detailed_section = True
                     continue
                 if in_detailed_section and f"Row {row_number}:" in detail_line:
+                    # Extract and clean the detailed reasoning
                     detailed_reasoning = detail_line.replace(f"Row {row_number}:", "").strip()
+                    # Remove markdown bold formatting (**text** -> text)
+                    detailed_reasoning = re.sub(r'\*\*([^*]+)\*\*', r'\1', detailed_reasoning)
+                    # Remove any remaining asterisks
+                    detailed_reasoning = detailed_reasoning.replace('*', '').strip()
                     break
             
             return {
