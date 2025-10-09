@@ -7,6 +7,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import os
 import json
+import base64
 from dotenv import load_dotenv
 import openai
 from datetime import datetime
@@ -25,10 +26,17 @@ def get_spreadsheet(sheet_id=None):
     
     if creds_json:
         try:
-            # Parse JSON from environment variable
-            creds_dict = json.loads(creds_json)
+            # Try to decode base64 first (Vercel format)
+            try:
+                decoded = base64.b64decode(creds_json).decode('utf-8')
+                creds_dict = json.loads(decoded)
+                print("Using base64-encoded Google credentials from environment variable")
+            except:
+                # Fall back to plain JSON
+                creds_dict = json.loads(creds_json)
+                print("Using plain JSON Google credentials from environment variable")
+            
             creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            print("Using Google credentials from environment variable")
         except Exception as e:
             print(f"Error parsing credentials from environment: {e}")
             raise
