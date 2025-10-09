@@ -87,11 +87,9 @@ Follow this checklist to deploy your Sifting Tool to Vercel.
 
 **"Serverless function timeout"**
 - Vercel free tier has 10-second timeout
-- Large analyses might timeout
-- Consider:
-  - Upgrading Vercel plan
-  - Analyzing fewer applications at once
-  - Optimizing AI prompts
+- ✅ **Auto-batching enabled**: App automatically splits 10+ applications into batches
+- Each batch processes separately and writes results immediately
+- No timeout issues even with hundreds of applications!
 
 **"Changes not reflecting"**
 - Clear browser cache

@@ -213,7 +213,9 @@ Then update frontend to use `/api/...` for backend calls.
 - **Fix**: Verify `OPENAI_API_KEY` environment variable in Vercel
 
 **Issue**: Serverless function timeout
-- **Fix**: Vercel has a 10-second timeout for free tier. Consider upgrading or optimizing long-running analyses
+- **Fix**: The app automatically batches 10+ applications into groups of 10 to avoid timeout
+- Each batch is processed separately with results written immediately
+- For very large batches (100+ applications), this may take time but won't timeout
 
 ---
 

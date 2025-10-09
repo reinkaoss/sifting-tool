@@ -261,66 +261,173 @@ function App() {
 
     setIsProcessing(true);
     setProcessingProgress(0);
-    addTerminalLog(`Analyzing ${selectedSheetRows.length} selected applications...`);
+
+    const BATCH_SIZE = 10; // Batch size to avoid serverless timeout
+    const totalApplications = selectedSheetRows.length;
     
-    try {
-      const progressInterval = setInterval(() => {
-        setProcessingProgress(prev => {
-          if (prev >= 90) return prev;
-          return prev + Math.random() * 10;
-        });
-      }, 500);
-
-      const response = await fetch(`${API_URL}/sheets/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          selectedRows: selectedSheetRows,
-          client: selectedClient,
-          jobDescription: jobDescription,
-          supportingReferences: supportingReferences,
-          sheetId: sheetId,
-          gid: gid
-        })
-      });
-
-      clearInterval(progressInterval);
-      setProcessingProgress(100);
-
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
-      }
-
-      const result = await response.json();
+    // Check if we need to batch (10+ applications)
+    if (totalApplications >= BATCH_SIZE) {
+      addTerminalLog(`📦 Batching ${totalApplications} applications into groups of ${BATCH_SIZE} to avoid timeout...`);
       
-      if (result.success) {
-        addTerminalLog(`✅ Analysis complete! ${result.analyzed_count} applications analyzed and written to Google Sheets`);
-        
-        // Check for failed applications
-        if (result.failed_count > 0) {
-          setFailedApplications(result.failed);
-          setShowFailedModal(true);
-          addTerminalLog(`⚠️ Warning: ${result.failed_count} applications failed to analyze`);
+      // Split into batches
+      const batches = [];
+      for (let i = 0; i < selectedSheetRows.length; i += BATCH_SIZE) {
+        batches.push(selectedSheetRows.slice(i, i + BATCH_SIZE));
+      }
+      
+      addTerminalLog(`Created ${batches.length} batches`);
+      
+      let totalAnalyzed = 0;
+      let allFailedApplications = [];
+      
+      try {
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
+          const batchNum = batchIndex + 1;
+          
+          addTerminalLog(`\n🔄 Processing batch ${batchNum}/${batches.length} (${batch.length} applications)...`);
+          setProcessingProgress((batchNum / batches.length) * 90);
+          
+          try {
+            const response = await fetch(`${API_URL}/sheets/analyze`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                selectedRows: batch,
+                client: selectedClient,
+                jobDescription: jobDescription,
+                supportingReferences: supportingReferences,
+                sheetId: sheetId,
+                gid: gid
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error(`Batch ${batchNum} failed: ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            if (result.success) {
+              totalAnalyzed += result.analyzed_count;
+              addTerminalLog(`✅ Batch ${batchNum} complete: ${result.analyzed_count} analyzed, ${result.failed_count} failed`);
+              
+              // Collect failed applications
+              if (result.failed && result.failed.length > 0) {
+                allFailedApplications = [...allFailedApplications, ...result.failed];
+              }
+            } else {
+              addTerminalLog(`❌ Batch ${batchNum} error: ${result.error}`);
+              // Add all batch rows to failed
+              batch.forEach(row => {
+                const app = sheetApplications.find(a => a.row_number === row);
+                if (app) {
+                  allFailedApplications.push({
+                    row: row,
+                    name: `${app.first_name} ${app.surname}`,
+                    error: result.error || 'Batch processing failed'
+                  });
+                }
+              });
+            }
+          } catch (error) {
+            addTerminalLog(`❌ Batch ${batchNum} error: ${error.message}`);
+            // Add all batch rows to failed
+            batch.forEach(row => {
+              const app = sheetApplications.find(a => a.row_number === row);
+              if (app) {
+                allFailedApplications.push({
+                  row: row,
+                  name: `${app.first_name} ${app.surname}`,
+                  error: error.message
+                });
+              }
+            });
+          }
         }
         
-        // Refresh the list to remove analyzed applications
-        await loadFromGoogleSheets();
+        setProcessingProgress(100);
+        addTerminalLog(`\n🎉 All batches complete! ${totalAnalyzed} applications analyzed total`);
         
-        // Show success summary
-        const summary = result.results.map(r => `Row ${r.row}: ${r.name} - ${r.score}`).join('\n');
-        addTerminalLog(`Results:\n${summary}`);
-      } else {
-        throw new Error(result.error || 'Analysis failed');
+        // Show failed applications modal if any failed
+        if (allFailedApplications.length > 0) {
+          setFailedApplications(allFailedApplications);
+          setShowFailedModal(true);
+        }
+        
+        // Reload to show remaining unanalyzed
+        await loadFromGoogleSheets();
+        setSelectedSheetRows([]);
+        
+      } catch (error) {
+        addTerminalLog(`Error during batch processing: ${error.message}`);
       }
       
-    } catch (error) {
-      addTerminalLog(`Error during analysis: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
-      setProcessingProgress(0);
+    } else {
+      // Single batch (less than 10 applications)
+      addTerminalLog(`Analyzing ${totalApplications} selected applications...`);
+      
+      try {
+        const progressInterval = setInterval(() => {
+          setProcessingProgress(prev => {
+            if (prev >= 90) return prev;
+            return prev + Math.random() * 10;
+          });
+        }, 500);
+
+        const response = await fetch(`${API_URL}/sheets/analyze`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            selectedRows: selectedSheetRows,
+            client: selectedClient,
+            jobDescription: jobDescription,
+            supportingReferences: supportingReferences,
+            sheetId: sheetId,
+            gid: gid
+          })
+        });
+
+        clearInterval(progressInterval);
+        setProcessingProgress(100);
+
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (result.success) {
+          addTerminalLog(`✅ Analysis complete! ${result.analyzed_count} applications analyzed and written to Google Sheets`);
+          
+          // Check for failed applications
+          if (result.failed_count > 0) {
+            setFailedApplications(result.failed);
+            setShowFailedModal(true);
+            addTerminalLog(`⚠️ Warning: ${result.failed_count} applications failed to analyze`);
+          }
+          
+          // Refresh the list to remove analyzed applications
+          await loadFromGoogleSheets();
+          setSelectedSheetRows([]);
+          
+          // Show success summary
+          const summary = result.results.map(r => `Row ${r.row}: ${r.name} - ${r.score}`).join('\n');
+          addTerminalLog(`Results:\n${summary}`);
+        } else {
+          throw new Error(result.error || 'Analysis failed');
+        }
+      } catch (error) {
+        addTerminalLog(`Error during analysis: ${error.message}`);
+      }
     }
+    
+    setIsProcessing(false);
+    setProcessingProgress(0);
   };
 
   return (
