@@ -4,14 +4,6 @@ A web application for analyzing job application CSV files using AI.
 
 ## Quick Start
 
-### Option 1: One-Command Setup
-```bash
-./setup.sh
-npm start
-```
-
-### Option 2: Manual Setup
-
 1. **Install dependencies:**
    ```bash
    # Frontend
@@ -61,45 +53,4 @@ The application can automatically analyze job applications from Google Sheets:
 
 - **Read** applications from your Google Sheet
 - **Analyze** using AI with detailed scoring
-- **Write** results to a new "AI Analysis" tab with scores and reasoning
-
-### Quick Start
-
-1. Set up Google Cloud service account (see `GOOGLE_SHEETS_SETUP.md`)
-2. Share your spreadsheet with the service account
-3. Run the analyzer:
-   ```bash
-   cd backend
-   python3 sheets_processor.py
-   ```
-
-For detailed setup instructions, see `GOOGLE_SHEETS_SETUP.md`
-
-## 🚀 Deployment
-
-### Deploy to Vercel (5 minutes)
-
-The app is ready to deploy! Both frontend and backend deploy together in **one project**.
-
-**Quick Deploy:**
-1. Push code to GitHub/GitLab/Bitbucket
-2. Import project in [Vercel](https://vercel.com)
-3. Add 3 environment variables
-4. Deploy! ✨
-
-**📖 See**: [`SIMPLE_DEPLOYMENT.md`](./SIMPLE_DEPLOYMENT.md) for step-by-step guide
-
-**Features in Production:**
-- ✅ Auto-batching (handles 1000s of applications)
-- ✅ No timeout issues
-- ✅ Single domain (no CORS)
-- ✅ Auto-deployment on git push
-- ✅ Environment variables secure
-
-## 📚 Documentation
-
-- [`SIMPLE_DEPLOYMENT.md`](./SIMPLE_DEPLOYMENT.md) - Quick deployment guide
-- [`VERCEL_DEPLOYMENT.md`](./VERCEL_DEPLOYMENT.md) - Detailed deployment docs
-- [`DEPLOYMENT_CHECKLIST.md`](./DEPLOYMENT_CHECKLIST.md) - Step-by-step checklist
-- [`GOOGLE_SHEETS_SETUP.md`](./GOOGLE_SHEETS_SETUP.md) - Google Sheets integration
-- [`BATCHING_FEATURE.md`](./BATCHING_FEATURE.md) - How batching works
+- **Write** results to a new analysis tab with scores and detailed reasoning
