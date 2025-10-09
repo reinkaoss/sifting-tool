@@ -16,3 +16,5 @@ dist/
 
 # Vercel
 .vercel
+GOOGLE_CREDENTIALS_BASE64.txt
+base64_only.txt
