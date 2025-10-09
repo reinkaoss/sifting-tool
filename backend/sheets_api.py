@@ -467,10 +467,14 @@ def extract_scores_for_row(analysis, row_number, all_values):
             q7_match = re.search(r'Q7:\s*(\d+)\*', line)
             reason_match = re.search(r'-\s*([^*\n]+?)(?:\*\*)?$', line)
             
-            # Find detailed reasoning
+            # Find detailed reasoning - look after "DETAILED REASONING:" header
             detailed_reasoning = ''
+            in_detailed_section = False
             for j, detail_line in enumerate(lines):
-                if f"Row {row_number}:" in detail_line and "DETAILED REASONING" in '\n'.join(lines[:j]):
+                if "DETAILED REASONING" in detail_line:
+                    in_detailed_section = True
+                    continue
+                if in_detailed_section and f"Row {row_number}:" in detail_line:
                     detailed_reasoning = detail_line.replace(f"Row {row_number}:", "").strip()
                     break
             
