@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import openai
+from openai import OpenAI
 import os
 import json
 import requests
@@ -13,7 +13,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 
 # Initialize OpenAI client
-openai.api_key = os.getenv('OPENAI_API_KEY')
+openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Webhook configuration
 OUTGOING_WEBHOOK_URL = os.getenv('OUTGOING_WEBHOOK_URL', '')
@@ -100,7 +100,7 @@ def analyze_csv():
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
         # Call OpenAI API
-        response = openai.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are an expert HR analyst. Provide clear, actionable insights about job applications."},
@@ -243,7 +243,7 @@ def webhook_submit():
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
         # Call OpenAI API
-        response = openai.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are an expert HR analyst. Provide clear, actionable insights about job applications."},

@@ -9,7 +9,7 @@ import os
 import json
 import base64
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 from datetime import datetime
 import re
 
@@ -17,7 +17,9 @@ load_dotenv()
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 DEFAULT_SPREADSHEET_ID = "1jDJDQXPoZE6NTAqfTaCILv8ULXpM_vl5WeiEVSplChU"
-openai.api_key = os.getenv('OPENAI_API_KEY')
+
+# Initialize OpenAI client
+openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 def get_spreadsheet(sheet_id=None):
     """Get authenticated spreadsheet connection"""
@@ -438,7 +440,7 @@ Row [row_number]: [Detailed explanation]"
 """
     
     try:
-        response = openai.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are an expert HR analyst for EDF Trading."},
