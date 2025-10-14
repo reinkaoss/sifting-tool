@@ -610,7 +610,7 @@ function App() {
         </div>
 
       {/* Third Column - Client Questions */}
-      <div className="column client-questions-column">
+      <div className="column">
           <div className="section-header">
           <h3>Client Questions & Criteria</h3>
           </div>

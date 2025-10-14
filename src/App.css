@@ -13,12 +13,7 @@
   min-height: 0;
 }
 
-/* Client questions column is narrower sidebar */
-.client-questions-column {
-  flex: 0 0 300px; /* Fixed width of 300px */
-  max-width: 300px;
-  min-width: 250px;
-}
+/* Remove the special client questions column styling - make it equal */
 
 .column {
   background: white;
@@ -29,16 +24,9 @@
   overflow: hidden;
 }
 
-/* Applications column - left */
-.column:first-child {
-  flex: 0 0 35%; /* 35% width */
-  min-width: 300px;
-}
-
-/* Client & Job Details column - middle */
-.column:nth-child(2) {
-  flex: 0 0 35%; /* 35% width */
-  min-width: 300px;
+/* All columns are equal width */
+.column {
+  flex: 1;
 }
 
 /* Client Questions Column */
