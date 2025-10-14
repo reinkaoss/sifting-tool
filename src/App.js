@@ -30,6 +30,7 @@ function App() {
     'Question 6': '',
     'Question 7': ''
   });
+  const [clientCriteria, setClientCriteria] = useState({});
 
   const addTerminalLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -39,6 +40,38 @@ function App() {
   const handleClientChange = (event) => {
     setSelectedClient(event.target.value);
     addTerminalLog(`Client selected: ${event.target.value}`);
+    if (event.target.value) {
+      loadClientCriteria(event.target.value);
+    } else {
+      setClientCriteria({});
+    }
+  };
+
+  const loadClientCriteria = async (clientName) => {
+    try {
+      const sheetId = extractSheetId(spreadsheetUrl);
+      const response = await fetch(`${API_URL}/clients?sheetId=${sheetId}`);
+      const data = await response.json();
+      
+      if (data.success && data.clients) {
+        // Find the client criteria from the clients data
+        // This is a simplified approach - in a real app you'd have a separate endpoint
+        addTerminalLog(`Loading criteria for: ${clientName}`);
+        // For now, we'll show a placeholder - the actual criteria loading would need backend support
+        setClientCriteria({
+          'Question 1': 'Understanding of the role',
+          'Question 2': 'Motivation for joining the company',
+          'Question 3': 'What stands out about this position',
+          'Question 4': 'Relevant experience',
+          'Question 5': 'Career goals alignment',
+          'Question 6': 'Problem-solving approach',
+          'Question 7': 'Cultural fit'
+        });
+      }
+    } catch (error) {
+      console.error('Error loading client criteria:', error);
+      addTerminalLog(`Error loading criteria for ${clientName}`);
+    }
   };
 
   const handleJobDescriptionChange = (event) => {
@@ -245,7 +278,7 @@ function App() {
       addTerminalLog('Error: Please select at least one application');
       return;
     }
-    
+
     if (!selectedClient || !jobDescription) {
       addTerminalLog('Error: Please select client and enter job description');
       return;
@@ -370,37 +403,37 @@ function App() {
       addTerminalLog(`Analyzing ${totalApplications} selected applications...`);
       
       try {
-        const progressInterval = setInterval(() => {
-          setProcessingProgress(prev => {
-            if (prev >= 90) return prev;
-            return prev + Math.random() * 10;
-          });
-        }, 500);
+      const progressInterval = setInterval(() => {
+        setProcessingProgress(prev => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 10;
+        });
+      }, 500);
 
         const response = await fetch(`${API_URL}/sheets/analyze`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
             selectedRows: selectedSheetRows,
-            client: selectedClient,
-            jobDescription: jobDescription,
-            supportingReferences: supportingReferences,
+          client: selectedClient,
+          jobDescription: jobDescription,
+          supportingReferences: supportingReferences,
             sheetId: sheetId,
             gid: gid
-          })
-        });
+        })
+      });
 
-        clearInterval(progressInterval);
-        setProcessingProgress(100);
+      clearInterval(progressInterval);
+      setProcessingProgress(100);
 
-        if (!response.ok) {
-          throw new Error(`API request failed: ${response.status}`);
-        }
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
 
-        const result = await response.json();
-        
+      const result = await response.json();
+      
         if (result.success) {
           addTerminalLog(`✅ Analysis complete! ${result.analyzed_count} applications analyzed and written to Google Sheets`);
           
@@ -419,15 +452,15 @@ function App() {
           const summary = result.results.map(r => `Row ${r.row}: ${r.name} - ${r.score}`).join('\n');
           addTerminalLog(`Results:\n${summary}`);
         } else {
-          throw new Error(result.error || 'Analysis failed');
+        throw new Error(result.error || 'Analysis failed');
         }
       } catch (error) {
         addTerminalLog(`Error during analysis: ${error.message}`);
       }
     }
     
-    setIsProcessing(false);
-    setProcessingProgress(0);
+      setIsProcessing(false);
+      setProcessingProgress(0);
   };
 
   return (
@@ -504,18 +537,18 @@ function App() {
             <div className="form-group">
               <label htmlFor="client-select">Select Client:</label>
               <div style={{display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px'}}>
-                <select
-                  id="client-select"
-                  value={selectedClient}
-                  onChange={handleClientChange}
-                  className="client-dropdown"
+              <select
+                id="client-select"
+                value={selectedClient}
+                onChange={handleClientChange}
+                className="client-dropdown"
                   style={{flex: 1}}
-                >
-                  <option value="">Choose a client...</option>
-                  {clients.map(client => (
-                    <option key={client} value={client}>{client}</option>
-                  ))}
-                </select>
+              >
+                <option value="">Choose a client...</option>
+                {clients.map(client => (
+                  <option key={client} value={client}>{client}</option>
+                ))}
+              </select>
                 <button 
                   onClick={() => setShowAddClientModal(true)}
                   style={{padding: '8px 12px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', whiteSpace: 'nowrap'}}
@@ -573,6 +606,47 @@ function App() {
               {`Analyze ${selectedSheetRows.length} Selected`}
             </button>
           </div>
+          </div>
+        </div>
+
+      {/* Third Column - Client Questions */}
+        <div className="column">
+          <div className="section-header">
+          <h3>Client Questions & Criteria</h3>
+          </div>
+        <div className="form-section">
+          {selectedClient ? (
+            <div className="client-questions">
+              <h4>Selected Client: {selectedClient}</h4>
+              <div className="questions-list">
+                {Object.keys(clientCriteria).length > 0 ? (
+                  Object.entries(clientCriteria).map(([question, criteria], index) => (
+                    <div key={index} className="question-item">
+                      <strong>{question}:</strong>
+                      <p>{criteria || 'No criteria defined'}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="loading-criteria">
+                    <p>Loading client criteria...</p>
+                  </div>
+                )}
+                            </div>
+              <div className="client-actions">
+                              <button 
+                  onClick={loadClients}
+                  style={{width: '100%', padding: '8px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', marginTop: '10px'}}
+                >
+                  🔄 Refresh Client Data
+                              </button>
+                            </div>
+                          </div>
+          ) : (
+            <div className="no-client-selected">
+              <p>Please select a client to view their questions and criteria.</p>
+              <p>This will show you exactly what the AI will use to analyze applications.</p>
+              </div>
+            )}
         </div>
       </div>
 

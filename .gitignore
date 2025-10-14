@@ -16,5 +16,8 @@ dist/
 
 # Vercel
 .vercel
+
+# Credential files (never commit!)
 GOOGLE_CREDENTIALS_BASE64.txt
 base64_only.txt
+NEW_GOOGLE_CREDENTIALS_BASE64.txt

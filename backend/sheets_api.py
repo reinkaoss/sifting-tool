@@ -159,6 +159,9 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
         }
         applications.append(app)
     
+    # Get client criteria for dynamic scoring
+    client_criteria = get_client_criteria_from_sheet(client, sheet_id)
+    
     # Analyze with AI
     analysis = analyze_applications_ai(applications, client, job_description, supporting_references)
     
@@ -171,7 +174,7 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
     
     for app in applications:
         row_num = app['row_number']
-        scores = extract_scores_for_row(analysis, row_num, all_values)
+        scores = extract_scores_for_row(analysis, row_num, all_values, client_criteria)
         
         if scores:
             try:
@@ -412,6 +415,27 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
             'What_stands_out': app['what_stands_out']
         })
     
+    # Build dynamic scoring criteria based on client criteria
+    scoring_criteria = ""
+    if isinstance(client_criteria, dict) and client_criteria:
+        question_count = 0
+        for question_num, criteria in client_criteria.items():
+            question_count += 1
+            scoring_criteria += f"- Q{question_count}: \"{criteria}\" (1-5 stars)\n"
+        
+        # Use the actual number of questions from client criteria
+        max_score = question_count * 5
+        overall_score_text = f"Calculate the OVERALL SCORE as the SUM of all Q scores (max {max_score} stars)."
+        score_format = " ".join([f"Q{i+1}: [X]*" for i in range(question_count)])
+    else:
+        # Fallback to default 3 questions
+        scoring_criteria = """- Q1: "Understanding of role" (1-5 stars)
+- Q2: "Why EDF Trading" (1-5 stars)  
+- Q3: "What stands out about this position" (1-5 stars)"""
+        max_score = 15
+        overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars)."
+        score_format = "Q1: [X]* Q2: [X]* Q3: [X]*"
+
     prompt = f"""Analyze the following job applications for {client}:
 
 Job Description: {job_description}{supporting_text}
@@ -421,18 +445,16 @@ Number of Applications: {len(applications)}
 Applications Data:
 {json.dumps(apps_formatted, indent=2)}
 
-Client Scoring Criteria (7 Questions):
+Client Scoring Criteria:
 {criteria_text}
 
-For the 7-question Graduate Scheme format:
-- Q4: "Understanding of role" (1-5 stars)
-- Q6: "Why EDF Trading" (1-5 stars)  
-- Q7: "What stands out about this position" (1-5 stars)
+Scoring Questions:
+{scoring_criteria}
 
-IMPORTANT: Calculate the OVERALL SCORE as the SUM of Q4, Q6, and Q7 (max 15 stars).
+IMPORTANT: {overall_score_text}
 
 For each candidate, provide the format EXACTLY as shown:
-"Row [row_number] - Overall Score **[X]/15** - Q4: [X]* Q6: [X]* Q7: [X]* - [brief reason]"
+"Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
 
 After the main analysis, provide detailed reasoning:
 "DETAILED REASONING:
@@ -454,17 +476,30 @@ Row [row_number]: [Detailed explanation for this specific candidate]"
         print(f"Error during AI analysis: {e}")
         return None
 
-def extract_scores_for_row(analysis, row_number, all_values):
+def extract_scores_for_row(analysis, row_number, all_values, client_criteria=None):
     """Extract scores from analysis for a specific row"""
     lines = analysis.split('\n')
     
+    # Determine number of questions from client criteria
+    question_count = 3  # default
+    if isinstance(client_criteria, dict) and client_criteria:
+        question_count = len(client_criteria)
+    
     for i, line in enumerate(lines):
         if f"Row {row_number}" in line and "Overall Score" in line:
-            # Extract scores
-            score_match = re.search(r'Overall Score\s+\*?\*?(\d+)/15', line)
-            q4_match = re.search(r'Q4:\s*(\d+)\*', line)
-            q6_match = re.search(r'Q6:\s*(\d+)\*', line)
-            q7_match = re.search(r'Q7:\s*(\d+)\*', line)
+            # Extract overall score (dynamic max score)
+            max_score = question_count * 5
+            score_match = re.search(rf'Overall Score\s+\*?\*?(\d+)/{max_score}', line)
+            
+            # Extract individual question scores dynamically
+            question_scores = {}
+            for q_num in range(1, question_count + 1):
+                q_match = re.search(rf'Q{q_num}:\s*(\d+)\*', line)
+                if q_match:
+                    question_scores[f'q{q_num}_score'] = f"{q_match.group(1)}*"
+                else:
+                    question_scores[f'q{q_num}_score'] = 'N/A'
+            
             reason_match = re.search(r'-\s*([^*\n]+?)(?:\*\*)?$', line)
             
             # Find detailed reasoning - look after "DETAILED REASONING:" header
@@ -515,14 +550,18 @@ def extract_scores_for_row(analysis, row_number, all_values):
                                 print(f"DEBUG: Line {l}: {lines[l][:100]}...")
                             break
             
-            return {
-                'overall_score': f"{score_match.group(1)}/15" if score_match else 'N/A',
-                'q4_score': f"{q4_match.group(1)}*" if q4_match else 'N/A',
-                'q6_score': f"{q6_match.group(1)}*" if q6_match else 'N/A',
-                'q7_score': f"{q7_match.group(1)}*" if q7_match else 'N/A',
+            # Build result with dynamic question scores
+            result = {
+                'overall_score': f"{score_match.group(1)}/{max_score}" if score_match else 'N/A',
                 'brief_reason': reason_match.group(1).strip() if reason_match else 'N/A',
                 'detailed_reasoning': detailed_reasoning or 'N/A'
             }
+            
+            # Add all question scores dynamically
+            for q_num in range(1, question_count + 1):
+                result[f'q{q_num}_score'] = question_scores.get(f'q{q_num}_score', 'N/A')
+            
+            return result
     
     return None
 
