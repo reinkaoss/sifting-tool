@@ -17,6 +17,7 @@
 .client-questions-column {
   flex: 0 0 300px; /* Fixed width of 300px */
   max-width: 300px;
+  min-width: 250px;
 }
 
 .column {
@@ -28,9 +29,16 @@
   overflow: hidden;
 }
 
-/* Default column behavior - takes equal space */
-.column:not(.client-questions-column) {
-  flex: 1;
+/* Applications column - left */
+.column:first-child {
+  flex: 0 0 35%; /* 35% width */
+  min-width: 300px;
+}
+
+/* Client & Job Details column - middle */
+.column:nth-child(2) {
+  flex: 0 0 35%; /* 35% width */
+  min-width: 300px;
 }
 
 /* Client Questions Column */
