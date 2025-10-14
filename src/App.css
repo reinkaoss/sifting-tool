@@ -13,11 +13,6 @@
   min-height: 0;
 }
 
-/* Main two columns take most space */
-.main-content .column:not(.client-questions-column) {
-  flex: 1;
-}
-
 /* Client questions column is narrower sidebar */
 .client-questions-column {
   flex: 0 0 300px; /* Fixed width of 300px */
@@ -25,13 +20,17 @@
 }
 
 .column {
-  flex: 1;
   background: white;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Default column behavior - takes equal space */
+.column:not(.client-questions-column) {
+  flex: 1;
 }
 
 /* Client Questions Column */
