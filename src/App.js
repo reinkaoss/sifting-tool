@@ -31,6 +31,7 @@ function App() {
     'Question 7': ''
   });
   const [clientCriteria, setClientCriteria] = useState({});
+  const [allClientsData, setAllClientsData] = useState([]);
 
   const addTerminalLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -49,28 +50,37 @@ function App() {
 
   const loadClientCriteria = async (clientName) => {
     try {
-      const sheetId = extractSheetId(spreadsheetUrl);
-      const response = await fetch(`${API_URL}/clients?sheetId=${sheetId}`);
-      const data = await response.json();
+      addTerminalLog(`Loading criteria for: ${clientName}`);
       
-      if (data.success && data.clients) {
-        // Find the client criteria from the clients data
-        // This is a simplified approach - in a real app you'd have a separate endpoint
-        addTerminalLog(`Loading criteria for: ${clientName}`);
-        // For now, we'll show a placeholder - the actual criteria loading would need backend support
+      // Find the specific client in the already loaded client data
+      const clientData = allClientsData.find(client => client.name === clientName);
+      
+      if (clientData && clientData.criteria) {
+        // Convert the criteria object to the format we need
+        const criteriaObject = {};
+        Object.entries(clientData.criteria).forEach(([key, value], index) => {
+          criteriaObject[`Question ${index + 1}`] = value;
+        });
+        setClientCriteria(criteriaObject);
+        addTerminalLog(`✅ Loaded criteria for client: ${clientName}`);
+      } else {
+        // Fallback to placeholder if no criteria found
         setClientCriteria({
           'Question 1': 'Understanding of the role',
-          'Question 2': 'Motivation for joining the company',
+          'Question 2': 'Motivation for joining the company', 
           'Question 3': 'What stands out about this position',
           'Question 4': 'Relevant experience',
           'Question 5': 'Career goals alignment',
           'Question 6': 'Problem-solving approach',
           'Question 7': 'Cultural fit'
         });
+        addTerminalLog(`⚠️ No criteria found for ${clientName}, using defaults`);
       }
     } catch (error) {
       console.error('Error loading client criteria:', error);
       addTerminalLog(`Error loading criteria for ${clientName}`);
+      // Set empty criteria on error
+      setClientCriteria({});
     }
   };
 
@@ -109,8 +119,12 @@ function App() {
       console.log('Clients response:', result); // Debug log
       
       if (result.success) {
-        setClients(result.clients);
-        addTerminalLog(`✅ Loaded ${result.clients.length} clients: ${result.clients.join(', ')}`);
+        // Store full client data for criteria lookup
+        setAllClientsData(result.clients);
+        // Extract just the client names for the dropdown
+        const clientNames = result.clients.map(client => client.name);
+        setClients(clientNames);
+        addTerminalLog(`✅ Loaded ${clientNames.length} clients: ${clientNames.join(', ')}`);
         } else {
         addTerminalLog('Error loading clients: ' + result.error);
       }

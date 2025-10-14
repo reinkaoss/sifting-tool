@@ -260,9 +260,26 @@ def get_clients_list(sheet_id=None):
             print("No clients found (need at least header + 1 row)")
             return []
         
-        # First column should be client names, skip header
-        clients = [row[0] for row in all_values[1:] if row and row[0]]
-        print(f"Extracted clients: {clients}")
+        # Extract full client data including criteria
+        headers = all_values[0]
+        clients = []
+        
+        for row in all_values[1:]:
+            if row and row[0]:  # Skip empty rows
+                client_name = row[0]
+                criteria = {}
+                
+                # Extract criteria from remaining columns
+                for i, header in enumerate(headers[1:], start=1):
+                    if i < len(row) and row[i]:
+                        criteria[header] = row[i]
+                
+                clients.append({
+                    'name': client_name,
+                    'criteria': criteria
+                })
+        
+        print(f"Extracted {len(clients)} clients with criteria")
         return clients
     except Exception as e:
         print(f"Error getting clients list: {e}")
