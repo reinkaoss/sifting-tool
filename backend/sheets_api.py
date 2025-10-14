@@ -436,7 +436,7 @@ For each candidate, provide the format EXACTLY as shown:
 
 After the main analysis, provide detailed reasoning:
 "DETAILED REASONING:
-Row [row_number]: [Detailed explanation]"
+Row [row_number]: [Detailed explanation for this specific candidate]"
 """
     
     try:
@@ -474,14 +474,46 @@ def extract_scores_for_row(analysis, row_number, all_values):
                 if "DETAILED REASONING" in detail_line:
                     in_detailed_section = True
                     continue
-                if in_detailed_section and f"Row {row_number}:" in detail_line:
-                    # Extract and clean the detailed reasoning
-                    detailed_reasoning = detail_line.replace(f"Row {row_number}:", "").strip()
-                    # Remove markdown bold formatting (**text** -> text)
+                if in_detailed_section:
+                    # Look for various patterns that might contain the row reasoning
+                    if (f"Row {row_number}:" in detail_line or 
+                        f"Row {row_number} " in detail_line or
+                        f"Row {row_number}." in detail_line or
+                        f"Row {row_number}," in detail_line):
+                        # Extract and clean the detailed reasoning
+                        detailed_reasoning = detail_line
+                        # Remove the row prefix
+                        for prefix in [f"Row {row_number}:", f"Row {row_number} ", f"Row {row_number}.", f"Row {row_number},"]:
+                            detailed_reasoning = detailed_reasoning.replace(prefix, "").strip()
+                        # Remove markdown bold formatting (**text** -> text)
+                        detailed_reasoning = re.sub(r'\*\*([^*]+)\*\*', r'\1', detailed_reasoning)
+                        # Remove any remaining asterisks
+                        detailed_reasoning = detailed_reasoning.replace('*', '').strip()
+                        break
+                    # If we're in the detailed section and hit another row, we missed this one
+                    elif re.match(r'Row \d+', detail_line):
+                        break
+            
+            # Fallback: If no detailed reasoning found, try to extract from the brief reason
+            if not detailed_reasoning:
+                # Try to use the brief reason as detailed reasoning if available
+                if reason_match and reason_match.group(1).strip():
+                    detailed_reasoning = reason_match.group(1).strip()
+                    # Clean up the brief reason
                     detailed_reasoning = re.sub(r'\*\*([^*]+)\*\*', r'\1', detailed_reasoning)
-                    # Remove any remaining asterisks
                     detailed_reasoning = detailed_reasoning.replace('*', '').strip()
-                    break
+                
+                # Debug logging for N/A cases
+                if not detailed_reasoning:
+                    print(f"DEBUG: No detailed reasoning found for Row {row_number}")
+                    print(f"DEBUG: Looking for patterns: Row {row_number}:, Row {row_number} , Row {row_number}., Row {row_number},")
+                    # Show a few lines around the detailed reasoning section for debugging
+                    for k, debug_line in enumerate(lines):
+                        if "DETAILED REASONING" in debug_line:
+                            print(f"DEBUG: Found DETAILED REASONING at line {k}")
+                            for l in range(max(0, k-2), min(len(lines), k+10)):
+                                print(f"DEBUG: Line {l}: {lines[l][:100]}...")
+                            break
             
             return {
                 'overall_score': f"{score_match.group(1)}/15" if score_match else 'N/A',
