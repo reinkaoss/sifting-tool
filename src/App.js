@@ -598,7 +598,7 @@ function App() {
               />
             </div>
 
-            <button 
+            <button
               onClick={analyzeSelectedSheets}
               className="process-button"
               disabled={selectedSheetRows.length === 0 || !selectedClient || !jobDescription}
@@ -606,11 +606,10 @@ function App() {
               {`Analyze ${selectedSheetRows.length} Selected`}
             </button>
           </div>
-          </div>
         </div>
 
-      {/* Third Column - Client Questions */}
-      <div className="column">
+        {/* Third Column - Client Questions */}
+        <div className="column">
           <div className="section-header">
           <h3>Client Questions & Criteria</h3>
           </div>
@@ -648,6 +647,7 @@ function App() {
               </div>
             )}
         </div>
+      </div>
       </div>
 
       {/* Terminal Status Bar */}
