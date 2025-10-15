@@ -453,14 +453,15 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
         overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars)."
         score_format = "Q1: [X]* Q2: [X]* Q3: [X]*"
 
-    prompt = f"""You are analyzing job applications for {client} using STRICT CLIENT-SPECIFIC CRITERIA.
+    prompt = f"""ANALYZE APPLICATIONS FOR {client} USING ONLY THE CLIENT CRITERIA BELOW.
 
-CRITICAL INSTRUCTIONS:
-1. You MUST ONLY use the client criteria provided below for scoring
-2. IGNORE generic job description analysis - ONLY use the specific client criteria
-3. If a candidate's answers don't align with the client criteria, score them LOW (1-2 stars per question)
-4. The client criteria are MANDATORY - do not fall back to generic analysis
-5. Each question must be scored based ONLY on how well the candidate addresses the specific client criteria
+🚨 CRITICAL RULES - FOLLOW EXACTLY:
+1. IGNORE the job description completely - DO NOT use it for scoring
+2. IGNORE generic role understanding - ONLY use the specific client criteria
+3. If client criteria are numbers like "234" or "23423", these are INVALID criteria
+4. For INVALID criteria (numbers/gibberish), give 1 star per question MAXIMUM
+5. DO NOT make assumptions about what criteria "should" be
+6. ONLY score based on how well candidates address the EXACT client criteria provided
 
 Job Description: {job_description}{supporting_text}
 
@@ -469,22 +470,19 @@ Number of Applications: {len(applications)}
 Applications Data:
 {json.dumps(apps_formatted, indent=2)}
 
-MANDATORY CLIENT SCORING CRITERIA (USE THESE EXACTLY):
+🎯 MANDATORY CLIENT CRITERIA (SCORE ONLY ON THESE):
 {criteria_text}
 
 SCORING RULES:
 {scoring_criteria}
 
-SCORING GUIDELINES:
-- 5 stars: Perfectly addresses the specific client criteria
-- 4 stars: Mostly addresses the client criteria with minor gaps
-- 3 stars: Partially addresses the client criteria
-- 2 stars: Barely addresses the client criteria
-- 1 star: Does not address the client criteria at all
-- 0 stars: Completely irrelevant to the client criteria
+🚨 SCORING EXAMPLES:
+- If criteria is "234" (invalid number) → Score 1 star (candidate can't address a number)
+- If criteria is "Understanding of role" → Score based on how well they explain role understanding
+- If criteria is gibberish → Score 1 star (candidate can't address gibberish)
 
 CRITICAL: {overall_score_text}
-DO NOT use generic job description analysis. ONLY score based on the client criteria above.
+DO NOT use job description. DO NOT use generic analysis. ONLY use the client criteria above.
 
 For each candidate, provide the format EXACTLY as shown:
 "Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
@@ -498,11 +496,11 @@ Row [row_number]: [Detailed explanation for this specific candidate]"
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST ONLY use the specific client criteria provided. Do NOT use generic job description analysis. Score candidates based EXCLUSIVELY on how well they address the client's specific criteria. If criteria are unclear or irrelevant (like random numbers), score very low (1-2 stars per question)."},
+                {"role": "system", "content": f"You are a ROBOTIC HR analyst for {client}. You are PROGRAMMED to ONLY use the exact client criteria provided. You are FORBIDDEN from using job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, you MUST score 1 star per question. You CANNOT make assumptions. You CANNOT be creative. You MUST follow the criteria exactly as written."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.3
+            temperature=0.1
         )
         return response.choices[0].message.content
     except Exception as e:
