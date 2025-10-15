@@ -453,7 +453,14 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
         overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars)."
         score_format = "Q1: [X]* Q2: [X]* Q3: [X]*"
 
-    prompt = f"""Analyze the following job applications for {client}:
+    prompt = f"""You are analyzing job applications for {client} using STRICT CLIENT-SPECIFIC CRITERIA.
+
+CRITICAL INSTRUCTIONS:
+1. You MUST ONLY use the client criteria provided below for scoring
+2. IGNORE generic job description analysis - ONLY use the specific client criteria
+3. If a candidate's answers don't align with the client criteria, score them LOW (1-2 stars per question)
+4. The client criteria are MANDATORY - do not fall back to generic analysis
+5. Each question must be scored based ONLY on how well the candidate addresses the specific client criteria
 
 Job Description: {job_description}{supporting_text}
 
@@ -462,13 +469,22 @@ Number of Applications: {len(applications)}
 Applications Data:
 {json.dumps(apps_formatted, indent=2)}
 
-Client Scoring Criteria:
+MANDATORY CLIENT SCORING CRITERIA (USE THESE EXACTLY):
 {criteria_text}
 
-Scoring Questions:
+SCORING RULES:
 {scoring_criteria}
 
-IMPORTANT: {overall_score_text}
+SCORING GUIDELINES:
+- 5 stars: Perfectly addresses the specific client criteria
+- 4 stars: Mostly addresses the client criteria with minor gaps
+- 3 stars: Partially addresses the client criteria
+- 2 stars: Barely addresses the client criteria
+- 1 star: Does not address the client criteria at all
+- 0 stars: Completely irrelevant to the client criteria
+
+CRITICAL: {overall_score_text}
+DO NOT use generic job description analysis. ONLY score based on the client criteria above.
 
 For each candidate, provide the format EXACTLY as shown:
 "Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
@@ -482,11 +498,11 @@ Row [row_number]: [Detailed explanation for this specific candidate]"
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert HR analyst for EDF Trading."},
+                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST ONLY use the specific client criteria provided. Do NOT use generic job description analysis. Score candidates based EXCLUSIVELY on how well they address the client's specific criteria. If criteria are unclear or irrelevant (like random numbers), score very low (1-2 stars per question)."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.7
+            temperature=0.3
         )
         return response.choices[0].message.content
     except Exception as e:
