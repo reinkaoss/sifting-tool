@@ -463,6 +463,7 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
 5. DO NOT make assumptions about what criteria "should" be
 6. ONLY score based on how well candidates address the EXACT client criteria provided
 7. ANALYZE EACH CANDIDATE INDIVIDUALLY - give unique scores and reasoning for each
+8. READ EACH CANDIDATE'S ACTUAL ANSWERS CAREFULLY - do not use generic responses
 
 Job Description: {job_description}{supporting_text}
 
@@ -485,25 +486,32 @@ SCORING RULES:
 CRITICAL: {overall_score_text}
 DO NOT use job description. DO NOT use generic analysis. ONLY use the client criteria above.
 
-IMPORTANT: Each candidate must be analyzed individually. Look at their specific answers and score based on how well they address the client criteria.
+🚨 INDIVIDUAL ANALYSIS REQUIREMENTS:
+- READ each candidate's specific answers carefully
+- Score based on their ACTUAL responses, not generic templates
+- Give DIFFERENT scores for DIFFERENT answers
+- If a candidate gives a short answer, score accordingly
+- If a candidate gives a detailed answer, score accordingly
+- If a candidate gives a generic answer, score low
+- If a candidate gives a specific answer, score higher
 
 For each candidate, provide the format EXACTLY as shown:
 "Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
 
 After the main analysis, provide detailed reasoning:
 "DETAILED REASONING:
-Row [row_number]: [Detailed explanation for this specific candidate based on their actual answers]"
+Row [row_number]: [Detailed explanation for this specific candidate based on their ACTUAL answers - mention specific details from their response]"
 """
     
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST analyze each candidate individually using ONLY the specific client criteria provided. Do NOT use job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, score 1 star per question. Analyze each candidate's actual answers and provide unique scores and reasoning for each one."},
+                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST analyze each candidate individually using ONLY the specific client criteria provided. Do NOT use job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, score 1 star per question. CRITICAL: Read each candidate's actual answers carefully and provide UNIQUE scores and reasoning based on their specific responses. Do NOT use template responses - each analysis must be different based on what the candidate actually wrote."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.2
+            temperature=0.3
         )
         return response.choices[0].message.content
     except Exception as e:
