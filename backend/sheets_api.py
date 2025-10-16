@@ -453,7 +453,7 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
         overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars)."
         score_format = "Q1: [X]* Q2: [X]* Q3: [X]*"
 
-    prompt = f"""ANALYZE APPLICATIONS FOR {client} USING ONLY THE CLIENT CRITERIA BELOW.
+    prompt = f"""ANALYZE EACH APPLICATION INDIVIDUALLY FOR {client} USING ONLY THE CLIENT CRITERIA BELOW.
 
 🚨 CRITICAL RULES - FOLLOW EXACTLY:
 1. IGNORE the job description completely - DO NOT use it for scoring
@@ -462,6 +462,7 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
 4. For INVALID criteria (numbers/gibberish), give 1 star per question MAXIMUM
 5. DO NOT make assumptions about what criteria "should" be
 6. ONLY score based on how well candidates address the EXACT client criteria provided
+7. ANALYZE EACH CANDIDATE INDIVIDUALLY - give unique scores and reasoning for each
 
 Job Description: {job_description}{supporting_text}
 
@@ -484,23 +485,25 @@ SCORING RULES:
 CRITICAL: {overall_score_text}
 DO NOT use job description. DO NOT use generic analysis. ONLY use the client criteria above.
 
+IMPORTANT: Each candidate must be analyzed individually. Look at their specific answers and score based on how well they address the client criteria.
+
 For each candidate, provide the format EXACTLY as shown:
 "Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
 
 After the main analysis, provide detailed reasoning:
 "DETAILED REASONING:
-Row [row_number]: [Detailed explanation for this specific candidate]"
+Row [row_number]: [Detailed explanation for this specific candidate based on their actual answers]"
 """
     
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are a ROBOTIC HR analyst for {client}. You are PROGRAMMED to ONLY use the exact client criteria provided. You are FORBIDDEN from using job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, you MUST score 1 star per question. You CANNOT make assumptions. You CANNOT be creative. You MUST follow the criteria exactly as written."},
+                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST analyze each candidate individually using ONLY the specific client criteria provided. Do NOT use job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, score 1 star per question. Analyze each candidate's actual answers and provide unique scores and reasoning for each one."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.1
+            temperature=0.2
         )
         return response.choices[0].message.content
     except Exception as e:
