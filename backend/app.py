@@ -4,6 +4,7 @@ from openai import OpenAI
 import os
 import json
 import requests
+import re
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -17,6 +18,128 @@ openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Webhook configuration
 OUTGOING_WEBHOOK_URL = os.getenv('OUTGOING_WEBHOOK_URL', '')
+
+def average_analysis_scores(analyses, user_count):
+    """
+    Average scores from multiple analysis runs.
+    Keep text from first run, but average all scores.
+    
+    Args:
+        analyses: List of 3 analysis strings
+        user_count: Number of users analyzed
+    
+    Returns:
+        String with averaged scores and text from first run
+    """
+    # Parse all analyses to extract scores
+    all_user_scores = {}  # {user_num: {run_num: {overall, q1, q2, ...}}}
+    
+    for run_idx, analysis in enumerate(analyses, 1):
+        lines = analysis.split('\n')
+        for line in lines:
+            # Look for user patterns like "User 1 -" or "1. **User 1"
+            user_match = re.search(r'(?:User\s+|^\d+\.\s*\*\*User\s+)(\d+)', line)
+            if user_match and 'Overall Score' in line:
+                user_num = user_match.group(1)
+                
+                if user_num not in all_user_scores:
+                    all_user_scores[user_num] = {}
+                
+                # Extract overall score
+                overall_match = re.search(r'Overall Score[*\s]+(\d+\.?\d*)/(\d+)', line)
+                
+                # Extract individual question scores (Q1, Q2, Q3, etc.)
+                q_scores = {}
+                for q_num in range(1, 10):  # Support up to Q9
+                    # Try numeric scores first
+                    q_match = re.search(rf'Q{q_num}:\s*(\d+\.?\d*)\*', line)
+                    if q_match:
+                        q_scores[f'q{q_num}'] = float(q_match.group(1))
+                    else:
+                        # Try Yes/No answers
+                        yesno_match = re.search(rf'Q{q_num}:\s*(Yes|No)', line, re.IGNORECASE)
+                        if yesno_match:
+                            q_scores[f'q{q_num}'] = yesno_match.group(1)
+                
+                all_user_scores[user_num][run_idx] = {
+                    'overall': float(overall_match.group(1)) if overall_match else 0,
+                    'max_score': int(overall_match.group(2)) if overall_match else 15,
+                    'questions': q_scores
+                }
+    
+    # Calculate averages for each user
+    averaged_scores = {}
+    for user_num, runs in all_user_scores.items():
+        if not runs:
+            continue
+            
+        # Average overall scores
+        overall_scores = [run['overall'] for run in runs.values()]
+        avg_overall = sum(overall_scores) / len(overall_scores)
+        max_score = runs[1]['max_score'] if 1 in runs else 15
+        
+        # Average question scores (only numeric ones)
+        avg_questions = {}
+        all_q_keys = set()
+        for run in runs.values():
+            all_q_keys.update(run['questions'].keys())
+        
+        for q_key in all_q_keys:
+            q_values = []
+            for run in runs.values():
+                val = run['questions'].get(q_key)
+                if val and isinstance(val, (int, float)):
+                    q_values.append(val)
+            
+            if q_values:
+                avg_questions[q_key] = sum(q_values) / len(q_values)
+            else:
+                # Keep Yes/No as-is from first run
+                avg_questions[q_key] = runs[1]['questions'].get(q_key, 'N/A')
+        
+        averaged_scores[user_num] = {
+            'overall': avg_overall,
+            'max_score': max_score,
+            'questions': avg_questions
+        }
+    
+    # Now rebuild the analysis using first run's text but with averaged scores
+    result_lines = []
+    first_analysis_lines = analyses[0].split('\n')
+    
+    for line in first_analysis_lines:
+        # Check if this line contains a user score
+        user_match = re.search(r'(?:User\s+|^\d+\.\s*\*\*User\s+)(\d+)', line)
+        if user_match and 'Overall Score' in line and user_match.group(1) in averaged_scores:
+            user_num = user_match.group(1)
+            scores = averaged_scores[user_num]
+            
+            # Rebuild the line with averaged scores
+            # Extract the part after the scores (the brief reason)
+            reason_match = re.search(r'-\s*([^*\n]+?)(?:\*\*)?$', line)
+            brief_reason = reason_match.group(1).strip() if reason_match else ''
+            
+            # Build new score line
+            score_parts = []
+            for q_key in sorted(scores['questions'].keys(), key=lambda x: int(re.search(r'\d+', x).group())):
+                q_num = re.search(r'\d+', q_key).group()
+                val = scores['questions'][q_key]
+                if isinstance(val, (int, float)):
+                    score_parts.append(f"Q{q_num}: {val:.2f}*")
+                else:
+                    score_parts.append(f"Q{q_num}: {val}")
+            
+            # Reconstruct the line
+            if line.strip().startswith(str(user_num) + '.'):
+                new_line = f"{user_num}. **User {user_num} - Overall Score {scores['overall']:.2f}/{scores['max_score']} - {' '.join(score_parts)} - {brief_reason}**"
+            else:
+                new_line = f"**User {user_num} - Overall Score {scores['overall']:.2f}/{scores['max_score']} - {' '.join(score_parts)} - {brief_reason}**"
+            
+            result_lines.append(new_line)
+        else:
+            result_lines.append(line)
+    
+    return '\n'.join(result_lines)
 
 @app.route('/analyze', methods=['POST'])
 def analyze_csv():
@@ -102,19 +225,26 @@ def analyze_csv():
         
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
-        # Call OpenAI API
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=4000,
-            temperature=0,  # Deterministic scoring - no variation
-            top_p=1  # Disable nucleus sampling for maximum consistency
-        )
+        # Call OpenAI API 3 times and average the scores for consistency
+        print(f"\n🔄 Running 3 analysis passes for {user_count} candidates to ensure scoring consistency...")
+        analyses = []
+        for run_num in range(1, 4):
+            print(f"  📊 Analysis run {run_num}/3...")
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0,
+                top_p=1
+            )
+            analyses.append(response.choices[0].message.content)
         
-        analysis = response.choices[0].message.content
+        print("  ✅ Averaging scores from 3 runs...")
+        # Average the scores from all 3 runs, keep text from first run
+        analysis = average_analysis_scores(analyses, user_count)
         
         # Create/refresh candidates.json with all candidates
         candidates_data = {
@@ -249,19 +379,26 @@ def webhook_submit():
         
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
-        # Call OpenAI API
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=4000,
-            temperature=0,  # Deterministic scoring - no variation
-            top_p=1  # Disable nucleus sampling for maximum consistency
-        )
+        # Call OpenAI API 3 times and average the scores for consistency
+        print(f"\n🔄 Running 3 analysis passes for {user_count} candidates to ensure scoring consistency...")
+        analyses = []
+        for run_num in range(1, 4):
+            print(f"  📊 Analysis run {run_num}/3...")
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0,
+                top_p=1
+            )
+            analyses.append(response.choices[0].message.content)
         
-        analysis = response.choices[0].message.content
+        print("  ✅ Averaging scores from 3 runs...")
+        # Average the scores from all 3 runs, keep text from first run
+        analysis = average_analysis_scores(analyses, user_count)
         
         # Prepare response payload
         response_payload = {

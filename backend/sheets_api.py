@@ -15,6 +15,121 @@ import re
 
 load_dotenv()
 
+def average_analysis_scores_sheets(analyses):
+    """
+    Average scores from multiple analysis runs for sheets.
+    Keep text from first run, but average all scores.
+    Similar to app.py version but adapted for sheets format (Row-based).
+    
+    Returns:
+        tuple: (averaged_analysis_text, raw_scores_by_row)
+        raw_scores_by_row: {row_num: {'overall': [s1, s2, s3], 'q1': [s1, s2, s3], ...}}
+    """
+    all_row_scores = {}  # {row_num: {run_num: {overall, q1, q2, ...}}}
+    
+    for run_idx, analysis in enumerate(analyses, 1):
+        lines = analysis.split('\n')
+        for line in lines:
+            # Look for Row patterns like "Row 2 -"
+            row_match = re.search(r'Row\s+(\d+)', line)
+            if row_match and 'Overall Score' in line:
+                row_num = row_match.group(1)
+                
+                if row_num not in all_row_scores:
+                    all_row_scores[row_num] = {}
+                
+                # Extract overall score
+                overall_match = re.search(r'Overall Score[*\s]+(\d+\.?\d*)/(\d+)', line)
+                
+                # Extract individual question scores
+                q_scores = {}
+                for q_num in range(1, 10):  # Support up to Q9
+                    # Try numeric scores
+                    q_match = re.search(rf'Q{q_num}:\s*(\d+\.?\d*)\*', line)
+                    if q_match:
+                        q_scores[f'q{q_num}'] = float(q_match.group(1))
+                    else:
+                        # Try Yes/No
+                        yesno_match = re.search(rf'Q{q_num}:\s*(Yes|No)', line, re.IGNORECASE)
+                        if yesno_match:
+                            q_scores[f'q{q_num}'] = yesno_match.group(1)
+                
+                all_row_scores[row_num][run_idx] = {
+                    'overall': float(overall_match.group(1)) if overall_match else 0,
+                    'max_score': int(overall_match.group(2)) if overall_match else 15,
+                    'questions': q_scores
+                }
+    
+    # Calculate averages and track raw scores for debugging
+    averaged_scores = {}
+    raw_scores_by_row = {}  # For debugging column
+    
+    for row_num, runs in all_row_scores.items():
+        if not runs:
+            continue
+            
+        overall_scores = [run['overall'] for run in runs.values()]
+        avg_overall = sum(overall_scores) / len(overall_scores)
+        max_score = runs[1]['max_score'] if 1 in runs else 15
+        
+        # Store raw overall scores for debugging
+        raw_scores_by_row[row_num] = {'overall': overall_scores}
+        
+        avg_questions = {}
+        all_q_keys = set()
+        for run in runs.values():
+            all_q_keys.update(run['questions'].keys())
+        
+        for q_key in all_q_keys:
+            q_values = []
+            for run in runs.values():
+                val = run['questions'].get(q_key)
+                if val and isinstance(val, (int, float)):
+                    q_values.append(val)
+            
+            if q_values:
+                avg_questions[q_key] = sum(q_values) / len(q_values)
+                # Store raw scores for this question
+                raw_scores_by_row[row_num][q_key] = q_values
+            else:
+                avg_questions[q_key] = runs[1]['questions'].get(q_key, 'N/A')
+                raw_scores_by_row[row_num][q_key] = [runs[1]['questions'].get(q_key, 'N/A')]
+        
+        averaged_scores[row_num] = {
+            'overall': avg_overall,
+            'max_score': max_score,
+            'questions': avg_questions
+        }
+    
+    # Rebuild analysis with averaged scores
+    result_lines = []
+    first_analysis_lines = analyses[0].split('\n')
+    
+    for line in first_analysis_lines:
+        row_match = re.search(r'Row\s+(\d+)', line)
+        if row_match and 'Overall Score' in line and row_match.group(1) in averaged_scores:
+            row_num = row_match.group(1)
+            scores = averaged_scores[row_num]
+            
+            reason_match = re.search(r'-\s*([^*\n]+?)(?:\*\*)?$', line)
+            brief_reason = reason_match.group(1).strip() if reason_match else ''
+            
+            score_parts = []
+            for q_key in sorted(scores['questions'].keys(), key=lambda x: int(re.search(r'\d+', x).group())):
+                q_num = re.search(r'\d+', q_key).group()
+                val = scores['questions'][q_key]
+                if isinstance(val, (int, float)):
+                    score_parts.append(f"Q{q_num}: {val:.2f}*")
+                else:
+                    score_parts.append(f"Q{q_num}: {val}")
+            
+            new_line = f"Row {row_num} - Overall Score **{scores['overall']:.2f}/{scores['max_score']}** - {' '.join(score_parts)} - {brief_reason}"
+            result_lines.append(new_line)
+        else:
+            result_lines.append(line)
+    
+    return '\n'.join(result_lines), raw_scores_by_row
+
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 DEFAULT_SPREADSHEET_ID = "1jDJDQXPoZE6NTAqfTaCILv8ULXpM_vl5WeiEVSplChU"
 
@@ -130,7 +245,7 @@ def ensure_headers_exist(worksheet, question_count, start_col=22):
         expected_headers = ['Overall Score']
         for q_num in range(1, question_count + 1):
             expected_headers.append(f'Q{q_num}')
-        expected_headers.extend(['Brief Reason', 'Analyzed Date', 'Client', 'Job Description'])
+        expected_headers.extend(['Brief Reason', 'Analyzed Date', 'Client', 'Job Description', 'Overall Score 1', 'Overall Score 2', 'Overall Score 3'])
         
         # Check if we need to add/update headers
         needs_update = False
@@ -218,10 +333,13 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
     ensure_headers_exist(worksheet, question_count, start_col=22)
     
     # Analyze with AI
-    analysis = analyze_applications_ai(applications, client, job_description, supporting_references)
+    analysis_result = analyze_applications_ai(applications, client, job_description, supporting_references)
     
-    if not analysis:
+    if not analysis_result:
         return {'error': 'Analysis failed'}
+    
+    # Unpack analysis and raw scores
+    analysis, raw_scores_by_row = analysis_result
     
     # Parse analysis and write to each row
     results = []
@@ -263,17 +381,33 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                         
                         values_row.append(q_formula)
                 
+                # Get the 3 individual overall scores for debugging
+                row_num_str = str(row_num)
+                overall_score_1 = ""
+                overall_score_2 = ""
+                overall_score_3 = ""
+                
+                if row_num_str in raw_scores_by_row:
+                    raw = raw_scores_by_row[row_num_str]
+                    if 'overall' in raw and len(raw['overall']) >= 3:
+                        overall_score_1 = f"{raw['overall'][0]:.2f}"
+                        overall_score_2 = f"{raw['overall'][1]:.2f}"
+                        overall_score_3 = f"{raw['overall'][2]:.2f}"
+                
                 # Add metadata columns
                 values_row.extend([
                     scores.get('brief_reason', ''),
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     client,
-                    job_description
+                    job_description,
+                    overall_score_1,
+                    overall_score_2,
+                    overall_score_3
                 ])
                 
                 # Calculate end column (start_col + overall_score + question_count + metadata)
-                # metadata: brief_reason, analyzed_date, client, job_description = 4 columns
-                end_col = start_col + 1 + question_count + 4 - 1  # -1 because start_col is 1-based
+                # metadata: brief_reason, analyzed_date, client, job_description, overall_score_1, overall_score_2, overall_score_3 = 7 columns
+                end_col = start_col + 1 + question_count + 7 - 1  # -1 because start_col is 1-based
                 
                 start_col_letter = column_index_to_letter(start_col)
                 end_col_letter = column_index_to_letter(end_col)
@@ -759,17 +893,25 @@ REMEMBER: ALL SCORES MUST BE DECIMAL WITH 2 DECIMAL PLACES (e.g., Q4: 3.75* Q6: 
         if is_7_question_format:
             system_content += "\n\n9. FOR 7-QUESTION FORMAT:\n   - Q1-Q5 are already displayed separately\n   - Focus your brief reason on role understanding, motivation, and what stands out\n   - Maximum 1-2 sentences (20-30 words)\n   - Natural flow - DO NOT mention question numbers\n   - Example: 'Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth.'\n   - Keep it professional but simple, and unique for each person\n   - REMEMBER: Score Q4, Q6, Q7 with 2 decimal places (e.g., 3.75*, 4.25*, 4.50*)"
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=4000,
-            temperature=0,  # Deterministic scoring - no variation
-            top_p=1  # Disable nucleus sampling for maximum consistency
-        )
-        analysis_text = response.choices[0].message.content
+        # Run analysis 3 times and average scores for consistency
+        print(f"\n🔄 Running 3 analysis passes for {len(applications)} candidates to ensure scoring consistency...")
+        analyses = []
+        for run_num in range(1, 4):
+            print(f"  📊 Analysis run {run_num}/3...")
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0,
+                top_p=1
+            )
+            analyses.append(response.choices[0].message.content)
+        
+        print("  ✅ Averaging scores from 3 runs...")
+        analysis_text, raw_scores_by_row = average_analysis_scores_sheets(analyses)
         
         # Debug: Save a snippet of the analysis to see the format
         print(f"\n{'='*80}")
@@ -778,10 +920,10 @@ REMEMBER: ALL SCORES MUST BE DECIMAL WITH 2 DECIMAL PLACES (e.g., Q4: 3.75* Q6: 
         print(analysis_text[:1000])
         print(f"{'='*80}\n")
         
-        return analysis_text
+        return analysis_text, raw_scores_by_row
     except Exception as e:
         print(f"Error during AI analysis: {e}")
-        return None
+        return None, {}
 
 def verify_client_criteria(client_name, sheet_id=None):
     """Verify and return the criteria being used for a specific client"""
@@ -930,7 +1072,8 @@ def extract_scores_for_row(analysis, row_number, all_values, client_criteria=Non
             if score_match:
                 try:
                     score_value = score_match.group(1)
-                    overall_score_str = f"{score_value}/{max_score}"
+                    # Just show the score value without "/max_score"
+                    overall_score_str = score_value
                 except Exception as e:
                     print(f"Error extracting overall score for Row {row_number}: {e}")
                     print(f"Line content: {line[:200]}")
