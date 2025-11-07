@@ -111,6 +111,53 @@ def get_unanalyzed_applications(sheet_id=None, gid=None):
     
     return unanalyzed
 
+def column_index_to_letter(n):
+    """Convert a 1-based column index to Excel column letter (1=A, 2=B, ..., 27=AA, etc.)"""
+    result = ""
+    while n > 0:
+        n -= 1
+        result = chr(65 + (n % 26)) + result
+        n //= 26
+    return result
+
+def ensure_headers_exist(worksheet, question_count, start_col=22):
+    """Ensure headers exist in row 1 for Overall Score, Q1-QN, and metadata columns"""
+    try:
+        all_values = worksheet.get_all_values()
+        headers_row = all_values[0] if all_values else []
+        
+        # Build expected headers
+        expected_headers = ['Overall Score']
+        for q_num in range(1, question_count + 1):
+            expected_headers.append(f'Q{q_num}')
+        expected_headers.extend(['Brief Reason', 'Analyzed Date', 'Client', 'Job Description'])
+        
+        # Check if we need to add/update headers
+        needs_update = False
+        headers_to_write = []
+        
+        # Start at column V (22, 1-based)
+        for i, header in enumerate(expected_headers):
+            col_index_0based = start_col - 1 + i  # Convert start_col to 0-based, then add i
+            col_index_1based = start_col + i  # For writing, use 1-based index
+            if col_index_0based >= len(headers_row):
+                # Need to extend headers row
+                needs_update = True
+                headers_to_write.append((col_index_1based, header))
+            elif col_index_0based < len(headers_row) and headers_row[col_index_0based] != header:
+                # Header exists but is different, update it
+                needs_update = True
+                headers_to_write.append((col_index_1based, header))
+        
+        if needs_update:
+            # Update headers in batch
+            for col_index, header in headers_to_write:
+                col_letter = column_index_to_letter(col_index)
+                worksheet.update(values=[[header]], range_name=f'{col_letter}1', value_input_option='USER_ENTERED')
+            print(f"Updated headers for {len(headers_to_write)} columns starting at column {column_index_to_letter(start_col)}")
+    except Exception as e:
+        print(f"Warning: Could not ensure headers exist: {e}")
+
 def analyze_and_write_to_sheet(selected_rows, client, job_description, supporting_references='', sheet_id=None, gid=None):
     """
     Analyze selected applications and write results back to the spreadsheet
@@ -162,6 +209,14 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
     # Get client criteria for dynamic scoring
     client_criteria = get_client_criteria_from_sheet(client, sheet_id)
     
+    # Determine number of questions from client criteria
+    question_count = 3  # default
+    if isinstance(client_criteria, dict) and client_criteria:
+        question_count = len(client_criteria)
+    
+    # Ensure headers exist in the spreadsheet
+    ensure_headers_exist(worksheet, question_count, start_col=22)
+    
     # Analyze with AI
     analysis = analyze_applications_ai(applications, client, job_description, supporting_references)
     
@@ -178,34 +233,54 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
         
         if scores:
             try:
-                # Extract numeric scores from strings like "4*" or "13/15"
-                overall_num = scores.get('overall_score', '').split('/')[0] if '/' in scores.get('overall_score', '') else ''
-                q4_num = scores.get('q4_score', '').replace('*', '') if scores.get('q4_score') else ''
-                q6_num = scores.get('q6_score', '').replace('*', '') if scores.get('q6_score') else ''
-                q7_num = scores.get('q7_score', '').replace('*', '') if scores.get('q7_score') else ''
+                # Start at column V (column 22, index 21)
+                start_col = 22
                 
-                # Create formulas for star rendering
-                q4_formula = f'=REPT(CHAR(9733),{q4_num})' if q4_num.isdigit() else scores.get('q4_score', '')
-                q6_formula = f'=REPT(CHAR(9733),{q6_num})' if q6_num.isdigit() else scores.get('q6_score', '')
-                q7_formula = f'=REPT(CHAR(9733),{q7_num})' if q7_num.isdigit() else scores.get('q7_score', '')
+                # Build values array: Overall Score, then all Q1-QN scores, then metadata
+                values_row = [scores.get('overall_score', '')]
                 
-                # Write to columns V onwards (column 22, index 21)
-                # V: Overall Score, W: Q4, X: Q6, Y: Q7, Z: Brief Reason, AA: Detailed Reasoning, AB: Analyzed Date, AC: Client, AD: Job Description
-                cell_range = f'V{row_num}:AD{row_num}'
-                values = [[
-                    scores.get('overall_score', ''),
-                    q4_formula,
-                    q6_formula,
-                    q7_formula,
+                # Add all question scores dynamically (Q1, Q2, Q3, Q4, Q5, Q6, Q7, etc.)
+                for q_num in range(1, question_count + 1):
+                    q_key = f'q{q_num}_score'
+                    q_score = scores.get(q_key, 'N/A')
+                    
+                    # Check if it's a Yes/No answer (don't convert to star formula)
+                    if q_score and q_score.upper() in ['YES', 'NO']:
+                        values_row.append(q_score)
+                    else:
+                        # Extract numeric value for star formula (handles decimals)
+                        q_num_val = q_score.replace('*', '') if q_score and q_score != 'N/A' else ''
+                        
+                        # Create formula for star rendering if it's a valid number (integer or decimal)
+                        try:
+                            # Try to convert to float to validate it's a number
+                            float_val = float(q_num_val)
+                            # For display, we'll show the decimal score as text since REPT only works with integers
+                            # We can't use REPT with decimals, so just display the score with a star
+                            q_formula = f'{q_num_val}*'
+                        except (ValueError, TypeError):
+                            q_formula = q_score
+                        
+                        values_row.append(q_formula)
+                
+                # Add metadata columns
+                values_row.extend([
                     scores.get('brief_reason', ''),
-                    scores.get('detailed_reasoning', ''),
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     client,
                     job_description
-                ]]
+                ])
+                
+                # Calculate end column (start_col + overall_score + question_count + metadata)
+                # metadata: brief_reason, analyzed_date, client, job_description = 4 columns
+                end_col = start_col + 1 + question_count + 4 - 1  # -1 because start_col is 1-based
+                
+                start_col_letter = column_index_to_letter(start_col)
+                end_col_letter = column_index_to_letter(end_col)
+                cell_range = f'{start_col_letter}{row_num}:{end_col_letter}{row_num}'
                 
                 # Use value_input_option='USER_ENTERED' to interpret formulas instead of text
-                worksheet.update(values=values, range_name=cell_range, value_input_option='USER_ENTERED')
+                worksheet.update(values=[values_row], range_name=cell_range, value_input_option='USER_ENTERED')
                 results.append({
                     'row': row_num,
                     'name': f"{app['first_name']} {app['surname']}",
@@ -213,6 +288,8 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                 })
             except Exception as e:
                 print(f"Error writing row {row_num}: {e}")
+                import traceback
+                traceback.print_exc()
                 failed_rows.append({
                     'row': row_num,
                     'name': f"{app['first_name']} {app['surname']}",
@@ -419,39 +496,99 @@ def analyze_applications_ai(applications, client, job_description, supporting_re
     
     supporting_text = f"\n\nSupporting References:\n{supporting_references}" if supporting_references else ""
     
-    # Format applications with row numbers
+    # Format applications with row numbers - include Yes/No fields
     apps_formatted = []
     for app in applications:
-        apps_formatted.append({
+        app_data = {
             'Row': app['row_number'],
             'Name': f"{app['first_name']} {app['surname']}",
             'University': app['university'],
             'Course': app['course'],
-            'Understanding_of_role': app['understanding_of_role'],
-            'Why_EDF': app['why_edf'],
-            'What_stands_out': app['what_stands_out']
-        })
+            'Right_to_work_UK': app.get('right_to_work', ''),
+            'Visa_sponsorship_required': app.get('visa_sponsorship', ''),
+            'GCSE_Maths_grade': app.get('gcse_maths', ''),
+            'Available_Sept_2026': app.get('available_sept_2026', ''),
+            'Understanding_of_role': app.get('understanding_of_role', ''),
+            'Why_EDF': app.get('why_edf', ''),
+            'What_stands_out': app.get('what_stands_out', '')
+        }
+        apps_formatted.append(app_data)
+    
+    # Determine number of questions and format type
+    question_count = 3  # default
+    is_7_question_format = False
+    if isinstance(client_criteria, dict) and client_criteria:
+        question_count = len(client_criteria)
+        # Check if it's a 7-question format (Graduate Scheme format)
+        is_7_question_format = (question_count == 7) or ("Graduate" in client and question_count >= 7)
     
     # Build dynamic scoring criteria based on client criteria
+    # IMPORTANT: Use the actual criteria from the Clients tab
     scoring_criteria = ""
+    
+    # Log what criteria we're using for verification
+    print(f"\n{'='*80}")
+    print(f"📋 CLIENT CRITERIA VERIFICATION for {client}")
+    print(f"{'='*80}")
     if isinstance(client_criteria, dict) and client_criteria:
-        question_count = 0
-        for question_num, criteria in client_criteria.items():
-            question_count += 1
-            scoring_criteria += f"- Q{question_count}: \"{criteria}\" (1-5 stars)\n"
+        print(f"✅ Loaded {len(client_criteria)} questions from Clients tab:")
+        for q_num, q_criteria in sorted(client_criteria.items()):
+            print(f"  {q_num}: {q_criteria[:150]}{'...' if len(q_criteria) > 150 else ''}")
+        print(f"\n📊 How these criteria will be used:")
+        if is_7_question_format:
+            print(f"  - Q1, Q2, Q3, Q5: Yes/No questions (from application data)")
+            print(f"  - Q4: Scored against '{client_criteria.get('Question 4', 'N/A')[:80]}...'")
+            print(f"  - Q6: Scored against '{client_criteria.get('Question 6', 'N/A')[:80]}...'")
+            print(f"  - Q7: Scored against '{client_criteria.get('Question 7', 'N/A')[:80]}...'")
+        else:
+            for i, (q_num, q_criteria) in enumerate(sorted(client_criteria.items()), start=1):
+                print(f"  - Q{i}: Scored against '{q_criteria[:80]}...'")
+    else:
+        print(f"⚠️  No criteria found - using defaults")
+    print(f"{'='*80}\n")
+    
+    if is_7_question_format:
+        # 7-question format: Q1-Q3 and Q5 are Yes/No, Q4/Q6/Q7 are scored
+        # Map client criteria to questions (Question 1, Question 2, etc. from Clients tab)
+        q1_criteria = client_criteria.get('Question 1', '') if isinstance(client_criteria, dict) else ''
+        q2_criteria = client_criteria.get('Question 2', '') if isinstance(client_criteria, dict) else ''
+        q3_criteria = client_criteria.get('Question 3', '') if isinstance(client_criteria, dict) else ''
+        q4_criteria = client_criteria.get('Question 4', '') if isinstance(client_criteria, dict) else ''
+        q5_criteria = client_criteria.get('Question 5', '') if isinstance(client_criteria, dict) else ''
+        q6_criteria = client_criteria.get('Question 6', '') if isinstance(client_criteria, dict) else ''
+        q7_criteria = client_criteria.get('Question 7', '') if isinstance(client_criteria, dict) else ''
+        
+        # Build scoring criteria using ACTUAL criteria from Clients tab
+        scoring_criteria = f"""- Q1: "{q1_criteria if q1_criteria else 'Right to work in the UK'}" (Yes/No - extract from Right_to_work_UK field)
+- Q2: "{q2_criteria if q2_criteria else 'Visa sponsorship required'}" (Yes/No - extract from Visa_sponsorship_required field)
+- Q3: "{q3_criteria if q3_criteria else 'GCSE Maths grade'}" (Yes/No - extract from GCSE_Maths_grade field)
+- Q4: "{q4_criteria if q4_criteria else 'Understanding of role'}" (1.00-5.00 stars with 2 decimal places - score based on Understanding_of_role answer using this criteria: {q4_criteria})
+- Q5: "{q5_criteria if q5_criteria else 'Available from September 2026'}" (Yes/No - extract from Available_Sept_2026 field)
+- Q6: "{q6_criteria if q6_criteria else 'Why EDF Trading'}" (1.00-5.00 stars with 2 decimal places - score based on Why_EDF answer using this criteria: {q6_criteria})
+- Q7: "{q7_criteria if q7_criteria else 'What stands out about position'}" (1.00-5.00 stars with 2 decimal places - score based on What_stands_out answer using this criteria: {q7_criteria})"""
+        
+        max_score = 15  # Only Q4, Q6, Q7 are scored (3 questions × 5 stars = 15)
+        overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q4, Q6, and Q7 only (max 15 stars). Express as a decimal with 2 decimal places. Q1, Q2, Q3, and Q5 are Yes/No informational questions."
+        score_format = "Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X.XX]* Q5: Yes/No Q6: [X.XX]* Q7: [X.XX]*"
+    elif isinstance(client_criteria, dict) and client_criteria:
+        question_count = len(client_criteria)
+        # Use actual criteria from Clients tab - map Question 1, Question 2, etc. to Q1, Q2, etc.
+        for i, (question_num, criteria) in enumerate(client_criteria.items(), start=1):
+            q_num = i  # Use sequential numbering (Q1, Q2, Q3...)
+            scoring_criteria += f"- Q{q_num}: \"{criteria}\" (1.00-5.00 stars with 2 decimal places - score based on candidate's answer using this specific criteria)\n"
         
         # Use the actual number of questions from client criteria
         max_score = question_count * 5
-        overall_score_text = f"Calculate the OVERALL SCORE as the SUM of all Q scores (max {max_score} stars)."
-        score_format = " ".join([f"Q{i+1}: [X]*" for i in range(question_count)])
+        overall_score_text = f"Calculate the OVERALL SCORE as the SUM of all Q scores (max {max_score} stars). Express as a decimal with 2 decimal places."
+        score_format = " ".join([f"Q{i+1}: [X.XX]*" for i in range(question_count)])
     else:
         # Fallback to default 3 questions
-        scoring_criteria = """- Q1: "Understanding of role" (1-5 stars)
-- Q2: "Why EDF Trading" (1-5 stars)  
-- Q3: "What stands out about this position" (1-5 stars)"""
+        scoring_criteria = """- Q1: "Understanding of role" (1.00-5.00 stars with 2 decimal places)
+- Q2: "Why EDF Trading" (1.00-5.00 stars with 2 decimal places)  
+- Q3: "What stands out about this position" (1.00-5.00 stars with 2 decimal places)"""
         max_score = 15
-        overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars)."
-        score_format = "Q1: [X]* Q2: [X]* Q3: [X]*"
+        overall_score_text = "Calculate the OVERALL SCORE as the SUM of Q1, Q2, and Q3 (max 15 stars). Express as a decimal with 2 decimal places."
+        score_format = "Q1: [X.XX]* Q2: [X.XX]* Q3: [X.XX]*"
 
     prompt = f"""ANALYZE EACH APPLICATION INDIVIDUALLY FOR {client} USING ONLY THE CLIENT CRITERIA BELOW.
 
@@ -475,48 +612,205 @@ Applications Data:
 🎯 MANDATORY CLIENT CRITERIA (SCORE ONLY ON THESE):
 {criteria_text}
 
-SCORING RULES:
+📊 SCORING RULES - USE THE EXACT CRITERIA ABOVE FOR EACH QUESTION:
 {scoring_criteria}
 
+🚨 CRITICAL: For each scored question (Q4, Q6, Q7 in 7-question format, or all Q1-QN in other formats), you MUST:
+1. Read the candidate's answer for that specific question
+2. Compare it against the EXACT criteria provided above for that question
+3. Score 1.00-5.00 stars (with 2 decimal places) based on how well the candidate's answer addresses the SPECIFIC criteria for that question
+4. USE DECIMAL SCORES (e.g., 3.25*, 4.75*, 2.50*) to provide nuanced differentiation between candidates
+5. Do NOT use generic scoring - each question has its own specific criteria
+6. If a question's criteria is missing or invalid, you MUST still score based on what criteria is provided
+
+🚨 DECIMAL SCORING RANGES:
+- 1.00-1.99* = Poor match to criteria
+- 2.00-2.99* = Below average match to criteria
+- 3.00-3.99* = Average match to criteria
+- 4.00-4.99* = Good match to criteria
+- 5.00* = Excellent match to criteria
+
 🚨 SCORING EXAMPLES:
-- If criteria is "234" (invalid number) → Score 1 star (candidate can't address a number)
-- If criteria is "Understanding of role" → Score based on how well they explain role understanding
-- If criteria is gibberish → Score 1 star (candidate can't address gibberish)
+- If criteria is "234" (invalid number) → Score 1.00* (candidate can't address a number)
+- If criteria is "Understanding of role" → Score 1.00-5.00* based on how well they explain role understanding
+- If criteria is gibberish → Score 1.00* (candidate can't address gibberish)
 
 CRITICAL: {overall_score_text}
 DO NOT use job description. DO NOT use generic analysis. ONLY use the client criteria above.
+ALL SCORES MUST BE DECIMAL VALUES WITH 2 DECIMAL PLACES (e.g., 3.25*, 4.75*, 13.50/15).
 
 🚨 INDIVIDUAL ANALYSIS REQUIREMENTS:
 - READ each candidate's specific answers carefully
-- Score based on their ACTUAL responses, not generic templates
-- Give DIFFERENT scores for DIFFERENT answers
-- If a candidate gives a short answer, score accordingly
-- If a candidate gives a detailed answer, score accordingly
-- If a candidate gives a generic answer, score low
-- If a candidate gives a specific answer, score higher
+- Score 1.00-5.00* with 2 decimal places based on their ACTUAL responses, not generic templates
+- Give DIFFERENT scores for DIFFERENT answers using decimal precision
+- If a candidate gives a short answer, score accordingly (e.g., 2.25*, 2.75*)
+- If a candidate gives a detailed answer, score accordingly (e.g., 4.25*, 4.75*)
+- If a candidate gives a generic answer, score low (e.g., 2.00-2.50*)
+- If a candidate gives a specific answer, score higher (e.g., 4.00-5.00*)
 
-For each candidate, provide the format EXACTLY as shown:
-"Row [row_number] - Overall Score **[X]/{max_score}** - {score_format} - [brief reason]"
+🚨 UNIQUENESS CHECK - BEFORE SUBMITTING YOUR ANALYSIS:
+- Review ALL your brief reasons - if any 2 are similar, REWRITE them to be unique
+- Each candidate should have DIFFERENT wording, DIFFERENT focus, DIFFERENT structure
+- NO templates, NO copy-paste, NO generic phrases repeated across candidates
+- Use casual language - contractions, informal words, conversational tone
+- Avoid formal HR-speak like "demonstrates", "exhibits", "aligns with", "however"
 
-After the main analysis, provide detailed reasoning:
-"DETAILED REASONING:
-Row [row_number]: [Detailed explanation for this specific candidate based on their ACTUAL answers - mention specific details from their response]"
+{"FOR 7-QUESTION FORMAT (Graduate Scheme):" if is_7_question_format else ""}
+{"- Q1, Q2, Q3, and Q5 are Yes/No questions - extract from Right_to_work_UK, Visa_sponsorship_required, GCSE_Maths_grade, and Available_Sept_2026 fields" if is_7_question_format else ""}
+{"- ONLY Q4, Q6, and Q7 are scored (1.00-5.00 stars with 2 decimal places)" if is_7_question_format else ""}
+{"- DO NOT use brackets around Yes/No answers (write 'Q1: Yes' not 'Q1: [Yes]')" if is_7_question_format else ""}
+{"- DO NOT list Yes/No answers in brief reason - focus on Q4, Q6, Q7 content only" if is_7_question_format else ""}
+
+For each candidate, provide the format EXACTLY as shown (USE DECIMAL SCORES with 2 decimal places):
+"Row [row_number] - Overall Score **[X.XX]/{max_score}** - {score_format} - [brief reason]"
+
+🚨 CRITICAL: The [brief reason] MUST be:
+- Maximum 1-2 sentences (20-30 words total)
+- Professional but simple - natural flow, NO question number mentions
+- Examples:
+  * "Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth."
+  * "Shows a general idea of the role but lacks depth. Drawn to the market position but could've tied in more specifics."
+
+REMEMBER: ALL SCORES MUST BE DECIMAL WITH 2 DECIMAL PLACES (e.g., Q4: 3.75* Q6: 4.25* Q7: 4.50* - Overall Score **12.50/15**)
 """
     
     try:
+        system_content = f"""You are an early careers recruiter analyzing applications for {client}. Write like you're texting a colleague, not writing a formal report.
+
+🚨 CRITICAL RULES - VIOLATION WILL RESULT IN REJECTION:
+
+1. EVERY CANDIDATE GETS A COMPLETELY DIFFERENT RESPONSE
+   - If you write the same phrase for 2+ candidates, you FAILED
+   - Each brief reason must be 100% unique - no copy-paste, no templates
+   - Use different words, different structure, different focus for each candidate
+   - Think: "What makes THIS candidate different from everyone else?"
+   
+2. WRITE CASUALLY - LIKE YOU'RE CHATTING WITH A COWORKER
+   - Use contractions (they're, doesn't, hasn't)
+   - Use casual phrases (kinda, sorta, pretty much, not really)
+   - Avoid formal language (e.g., "demonstrates", "exhibits", "aligns with")
+   - Write short, punchy observations, not essays
+   - Examples:
+     * BAD: "Candidate demonstrates a comprehensive understanding of the role"
+     * GOOD: "Gets the role - talks about supporting traders and building models"
+     * BAD: "Shows alignment with organizational values"  
+     * GOOD: "Seems genuinely interested in energy markets, not just any internship"
+   
+3. READ EACH CANDIDATE'S ACTUAL ANSWERS - FIND WHAT'S UNIQUE
+   - Role understanding: What specifically did THEY say? Not generic role stuff
+   - Motivation: What specific reason did THEY give? Is it generic or personal?
+   - What stands out: What caught THEIR eye? Be specific
+   
+4. BRIEF REASON FORMAT (THIS IS THE ONLY REASONING YOU PROVIDE):
+   - MAXIMUM 1-2 SENTENCES (around 20-30 words total)
+   - Natural flow: role understanding + motivation/interest
+   - Professional but simple - like you're quickly summarizing to a colleague
+   - DO NOT mention question numbers (no "Q1 was...", "Q4 shows...", "In Q6...")
+   - Just flow naturally from one observation to the next
+   - Examples:
+     * PERFECT: "Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning at EDFT and ties in personal growth with company values."
+     * PERFECT: "Shows a general idea of the role but lacks depth. He's drawn to EDFT's market position but could've tied in more specifics about the role."
+     * PERFECT: "Good grasp of the role, mentions analytical skills and programming. Really digs the culture and structure of the internship."
+     * BAD (mentions questions): "Q4 shows understanding. Q6 reveals motivation. Q7 is strong."
+     * BAD (too long): "Gets into the depth of EDF's role in energy and mentions practical experience, which is great. Shows a clear desire to contribute to EDF's goals, not just personal gain."
+   - This is the ONLY analysis text you provide - no separate detailed section
+   
+5. EXAMPLES OF GOOD VS BAD:
+
+   BAD (too formal, generic, could apply to anyone):
+   "Candidate shows a general understanding of the role, mentioning support for traders and analysts. However, the response lacks depth regarding EDF Trading's position."
+   
+   PERFECT (natural flow, no question mentions):
+   "Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth with company values."
+   
+   PERFECT (professional but simple):
+   "Shows a general idea of the role but lacks depth. Drawn to the market position but could've tied in more specifics about the role."
+   
+   BAD (mentions question numbers):
+   "Q4 shows solid understanding. Q6 reveals genuine interest. Q7 is decent though - at least talks about learning vs contributing."
+   
+   BAD (way too long):
+   "Mentions data modeling and trader support but pretty surface-level. Just wants to 'apply their skills' - not much substance. Answer is decent though - at least talks about learning vs contributing."
+   
+   BAD (formal and wordy):
+   "Candidate demonstrates understanding of role requirements and expresses interest in the position. Response could benefit from more specific examples."
+   
+6. FORBIDDEN PHRASES/PATTERNS:
+   - "Candidate shows/demonstrates/exhibits"
+   - "However, the response lacks depth"
+   - "aligns with", "demonstrates alignment"  
+   - "could benefit from", "would be enhanced by"
+   - Mentioning question numbers: "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "In Q4...", "Q6 shows..."
+   - Any phrase that appears in 2+ candidate analyses
+   - Writing more than 2 sentences (keep it SHORT!)
+   
+7. SCORING RULES:
+   - Use ONLY the specific criteria from "🎯 MANDATORY CLIENT CRITERIA"
+   - Each question has its own criteria - score against that specific criteria
+   - Score from 1.00-5.00 with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, NOT 3* or 4*)
+   - Use decimal precision to differentiate candidates (e.g., 3.25* vs 3.75*)
+   - Be strict - most candidates won't hit all criteria perfectly
+   
+8. DECIMAL SCORING IS MANDATORY:
+   - ALWAYS use 2 decimal places for ALL scores (e.g., 3.75*, NOT 3*)
+   - Overall score must also have 2 decimals (e.g., 12.50/15, NOT 12/15)
+   - Examples: Q4: 3.75* Q6: 4.25* Q7: 4.50* - Overall Score **12.50/15**"""
+        
+        if is_7_question_format:
+            system_content += "\n\n9. FOR 7-QUESTION FORMAT:\n   - Q1-Q5 are already displayed separately\n   - Focus your brief reason on role understanding, motivation, and what stands out\n   - Maximum 1-2 sentences (20-30 words)\n   - Natural flow - DO NOT mention question numbers\n   - Example: 'Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth.'\n   - Keep it professional but simple, and unique for each person\n   - REMEMBER: Score Q4, Q6, Q7 with 2 decimal places (e.g., 3.75*, 4.25*, 4.50*)"
+        
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are a strict HR analyst for {client}. You MUST analyze each candidate individually using ONLY the specific client criteria provided. Do NOT use job descriptions or generic analysis. If client criteria are numbers like '234' or gibberish, score 1 star per question. CRITICAL: Read each candidate's actual answers carefully and provide UNIQUE scores and reasoning based on their specific responses. Do NOT use template responses - each analysis must be different based on what the candidate actually wrote."},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.3
+            temperature=0,  # Deterministic scoring - no variation
+            top_p=1  # Disable nucleus sampling for maximum consistency
         )
-        return response.choices[0].message.content
+        analysis_text = response.choices[0].message.content
+        
+        # Debug: Save a snippet of the analysis to see the format
+        print(f"\n{'='*80}")
+        print("📄 AI ANALYSIS OUTPUT (First 1000 chars):")
+        print(f"{'='*80}")
+        print(analysis_text[:1000])
+        print(f"{'='*80}\n")
+        
+        return analysis_text
     except Exception as e:
         print(f"Error during AI analysis: {e}")
         return None
+
+def verify_client_criteria(client_name, sheet_id=None):
+    """Verify and return the criteria being used for a specific client"""
+    try:
+        client_criteria = get_client_criteria_from_sheet(client_name, sheet_id)
+        
+        verification = {
+            'client': client_name,
+            'criteria_found': isinstance(client_criteria, dict) and len(client_criteria) > 0,
+            'question_count': len(client_criteria) if isinstance(client_criteria, dict) else 0,
+            'criteria': client_criteria,
+            'source': 'Clients tab' if client_criteria else 'JSON fallback or default'
+        }
+        
+        if isinstance(client_criteria, dict) and client_criteria:
+            verification['questions'] = {}
+            for q_num, q_criteria in sorted(client_criteria.items()):
+                verification['questions'][q_num] = {
+                    'criteria': q_criteria,
+                    'length': len(q_criteria)
+                }
+        
+        return verification
+    except Exception as e:
+        return {
+            'client': client_name,
+            'error': str(e),
+            'criteria_found': False
+        }
 
 def extract_scores_for_row(analysis, row_number, all_values, client_criteria=None):
     """Extract scores from analysis for a specific row"""
@@ -524,79 +818,132 @@ def extract_scores_for_row(analysis, row_number, all_values, client_criteria=Non
     
     # Determine number of questions from client criteria
     question_count = 3  # default
+    is_7_question_format = False
     if isinstance(client_criteria, dict) and client_criteria:
         question_count = len(client_criteria)
+        # Check if it's a 7-question format (Graduate Scheme format)
+        is_7_question_format = (question_count == 7)
+    
+    # Debug: Show all lines that contain "Overall Score" to see what format is being used
+    print(f"\nDEBUG: Looking for Row {row_number} in analysis...")
+    overall_score_lines = [line for line in lines if "Overall Score" in line]
+    if overall_score_lines:
+        print(f"DEBUG: Found {len(overall_score_lines)} lines with 'Overall Score':")
+        for idx, line in enumerate(overall_score_lines[:5]):  # Show first 5
+            print(f"  Line {idx}: {line[:200]}")
+    else:
+        print(f"DEBUG: No lines found with 'Overall Score' in analysis")
     
     for i, line in enumerate(lines):
-        if f"Row {row_number}" in line and "Overall Score" in line:
+        # Look for the row number in various formats
+        row_patterns = [
+            f"Row {row_number}",
+            f"Row {row_number}:",
+            f"Row {row_number} -",
+            f"Row {row_number}.",
+        ]
+        
+        if any(pattern in line for pattern in row_patterns) and "Overall Score" in line:
             # Extract overall score (dynamic max score)
-            max_score = question_count * 5
-            score_match = re.search(rf'Overall Score\s+\*?\*?(\d+)/{max_score}', line)
+            # For 7-question format, only Q4, Q6, Q7 are scored (max 15)
+            # For other formats, all questions are scored (max question_count * 5)
+            if is_7_question_format:
+                max_score = 15  # Only Q4, Q6, Q7 are scored
+            else:
+                max_score = question_count * 5
             
-            # Extract individual question scores dynamically
+            # Debug: print the line we're trying to parse
+            print(f"DEBUG: Extracting overall score from line for Row {row_number}:")
+            print(f"DEBUG: Line content: {line[:300]}")
+            print(f"DEBUG: Looking for max_score={max_score}, is_7_question_format={is_7_question_format}")
+            
+            # Try multiple patterns to extract overall score (with decimal support)
+            # Pattern 1: Decimal score with expected max_score and double asterisks (e.g., "Overall Score **13.50/15**")
+            score_match = re.search(rf'Overall Score\s+\*\*(\d+\.?\d*)/{max_score}\*\*', line)
+            
+            # Pattern 2: Decimal score with expected max_score and single asterisk (e.g., "Overall Score *13.50/15*")
+            if not score_match:
+                score_match = re.search(rf'Overall Score\s+\*(\d+\.?\d*)/{max_score}\*', line)
+            
+            # Pattern 3: Decimal score with expected max_score no asterisks (e.g., "Overall Score 13.50/15")
+            if not score_match:
+                score_match = re.search(rf'Overall Score\s+(\d+\.?\d*)/{max_score}', line)
+            
+            # Pattern 4: Any decimal score pattern with double asterisks (e.g., "Overall Score **13.50/15**")
+            if not score_match:
+                score_match = re.search(r'Overall Score\s+\*\*(\d+\.?\d*)/(\d+)\*\*', line)
+            
+            # Pattern 5: Any decimal score pattern (X.XX/Y) as fallback
+            if not score_match:
+                fallback_match = re.search(r'Overall Score\s+\*?\*?(\d+\.?\d*)/(\d+)', line)
+                if fallback_match:
+                    actual_score = fallback_match.group(1)
+                    actual_max = fallback_match.group(2)
+                    print(f"Warning: Overall score format mismatch for Row {row_number}. Expected {max_score}, found {actual_max}. Using score: {actual_score}")
+                    # Create a match object-like structure
+                    class MatchObj:
+                        def __init__(self, score):
+                            self.group = lambda n: score if n == 1 else None
+                    score_match = MatchObj(actual_score)
+            
+            # Pattern 6: Try to extract just the decimal number after Overall Score (e.g., "Overall Score **13.50**")
+            if not score_match:
+                simple_match = re.search(r'Overall Score\s+\*\*(\d+\.?\d*)\*\*', line)
+                if simple_match:
+                    actual_score = simple_match.group(1)
+                    print(f"Info: Extracted overall score {actual_score} for Row {row_number} (max score format not found, using {max_score})")
+                    class MatchObj:
+                        def __init__(self, score):
+                            self.group = lambda n: score if n == 1 else None
+                    score_match = MatchObj(actual_score)
+            
+            # Pattern 7: Try to extract just the decimal number (e.g., "Overall Score 13.50")
+            if not score_match:
+                simple_match = re.search(r'Overall Score\s+(\d+\.?\d*)', line)
+                if simple_match:
+                    actual_score = simple_match.group(1)
+                    print(f"Info: Extracted overall score {actual_score} for Row {row_number} (max score format not found, using {max_score})")
+                    class MatchObj:
+                        def __init__(self, score):
+                            self.group = lambda n: score if n == 1 else None
+                    score_match = MatchObj(actual_score)
+            
+            # Extract individual question scores dynamically (with decimal support)
             question_scores = {}
             for q_num in range(1, question_count + 1):
-                q_match = re.search(rf'Q{q_num}:\s*(\d+)\*', line)
+                # Try to match decimal numeric score first (e.g., "Q1: 4.25*" or "Q1: 4*")
+                q_match = re.search(rf'Q{q_num}:\s*(\d+\.?\d*)\*', line)
                 if q_match:
                     question_scores[f'q{q_num}_score'] = f"{q_match.group(1)}*"
                 else:
-                    question_scores[f'q{q_num}_score'] = 'N/A'
+                    # Try to match Yes/No answers (e.g., "Q1: Yes" or "Q1: No")
+                    yesno_match = re.search(rf'Q{q_num}:\s*(Yes|No)', line, re.IGNORECASE)
+                    if yesno_match:
+                        question_scores[f'q{q_num}_score'] = yesno_match.group(1)
+                    else:
+                        question_scores[f'q{q_num}_score'] = 'N/A'
             
             reason_match = re.search(r'-\s*([^*\n]+?)(?:\*\*)?$', line)
             
-            # Find detailed reasoning - look after "DETAILED REASONING:" header
-            detailed_reasoning = ''
-            in_detailed_section = False
-            for j, detail_line in enumerate(lines):
-                if "DETAILED REASONING" in detail_line:
-                    in_detailed_section = True
-                    continue
-                if in_detailed_section:
-                    # Look for various patterns that might contain the row reasoning
-                    if (f"Row {row_number}:" in detail_line or 
-                        f"Row {row_number} " in detail_line or
-                        f"Row {row_number}." in detail_line or
-                        f"Row {row_number}," in detail_line):
-                        # Extract and clean the detailed reasoning
-                        detailed_reasoning = detail_line
-                        # Remove the row prefix
-                        for prefix in [f"Row {row_number}:", f"Row {row_number} ", f"Row {row_number}.", f"Row {row_number},"]:
-                            detailed_reasoning = detailed_reasoning.replace(prefix, "").strip()
-                        # Remove markdown bold formatting (**text** -> text)
-                        detailed_reasoning = re.sub(r'\*\*([^*]+)\*\*', r'\1', detailed_reasoning)
-                        # Remove any remaining asterisks
-                        detailed_reasoning = detailed_reasoning.replace('*', '').strip()
-                        break
-                    # If we're in the detailed section and hit another row, we missed this one
-                    elif re.match(r'Row \d+', detail_line):
-                        break
-            
-            # Fallback: If no detailed reasoning found, try to extract from the brief reason
-            if not detailed_reasoning:
-                # Try to use the brief reason as detailed reasoning if available
-                if reason_match and reason_match.group(1).strip():
-                    detailed_reasoning = reason_match.group(1).strip()
-                    # Clean up the brief reason
-                    detailed_reasoning = re.sub(r'\*\*([^*]+)\*\*', r'\1', detailed_reasoning)
-                    detailed_reasoning = detailed_reasoning.replace('*', '').strip()
-                
-                # Debug logging for N/A cases
-                if not detailed_reasoning:
-                    print(f"DEBUG: No detailed reasoning found for Row {row_number}")
-                    print(f"DEBUG: Looking for patterns: Row {row_number}:, Row {row_number} , Row {row_number}., Row {row_number},")
-                    # Show a few lines around the detailed reasoning section for debugging
-                    for k, debug_line in enumerate(lines):
-                        if "DETAILED REASONING" in debug_line:
-                            print(f"DEBUG: Found DETAILED REASONING at line {k}")
-                            for l in range(max(0, k-2), min(len(lines), k+10)):
-                                print(f"DEBUG: Line {l}: {lines[l][:100]}...")
-                            break
-            
             # Build result with dynamic question scores
+            overall_score_str = 'N/A'
+            if score_match:
+                try:
+                    score_value = score_match.group(1)
+                    overall_score_str = f"{score_value}/{max_score}"
+                except Exception as e:
+                    print(f"Error extracting overall score for Row {row_number}: {e}")
+                    print(f"Line content: {line[:200]}")
+                    overall_score_str = 'N/A'
+            else:
+                # Debug: print the line that should contain the score
+                print(f"DEBUG: Could not extract overall score for Row {row_number}")
+                print(f"DEBUG: Looking for max_score={max_score}, is_7_question_format={is_7_question_format}")
+                print(f"DEBUG: Line content: {line[:200]}")
+            
             result = {
-                'overall_score': f"{score_match.group(1)}/{max_score}" if score_match else 'N/A',
-                'brief_reason': reason_match.group(1).strip() if reason_match else 'N/A',
-                'detailed_reasoning': detailed_reasoning or 'N/A'
+                'overall_score': overall_score_str,
+                'brief_reason': reason_match.group(1).strip() if reason_match else 'N/A'
             }
             
             # Add all question scores dynamically

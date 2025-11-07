@@ -136,14 +136,15 @@ Client Scoring Criteria (7 Questions):
 
 For the 7-question Graduate Scheme format:
 - Q1-Q3 and Q5 are Yes/No informational questions (use data from: Right to work, Visa sponsorship, GCSE Maths, Available Sept 2026)
-- Q4: "Understanding of role" (1-5 stars based on their answer)
-- Q6: "Why EDF Trading" (1-5 stars based on their answer)  
-- Q7: "What stands out about this position" (1-5 stars based on their answer)
+- Q4: "Understanding of role" (1.00-5.00 stars with 2 decimal places based on their answer)
+- Q6: "Why EDF Trading" (1.00-5.00 stars with 2 decimal places based on their answer)  
+- Q7: "What stands out about this position" (1.00-5.00 stars with 2 decimal places based on their answer)
 
-IMPORTANT: Calculate the OVERALL SCORE as the SUM of Q4, Q6, and Q7 (max 15 stars).
+IMPORTANT: Calculate the OVERALL SCORE as the SUM of Q4, Q6, and Q7 (max 15 stars). Express as a decimal with 2 decimal places.
+USE DECIMAL SCORES (e.g., 3.25*, 4.75*, 2.50*) to provide nuanced differentiation between candidates.
 
-For each candidate, provide the format EXACTLY as shown:
-"1. **User [Form_ID] - Overall Score **[X]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X]* Q5: Yes/No Q6: [X]* Q7: [X]* - [brief reason]**"
+For each candidate, provide the format EXACTLY as shown (use decimal scores with 2 decimal places):
+"1. **User [Form_ID] - Overall Score **[X.XX]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X.XX]* Q5: Yes/No Q6: [X.XX]* Q7: [X.XX]* - [brief reason]**"
 
 DO NOT use brackets around Yes/No answers (write "Q1: Yes" not "Q1: [Yes]")
 
@@ -157,11 +158,12 @@ User [Form_ID]: [Detailed explanation of why they received this score, including
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert HR analyst for EDF Trading. Provide clear, actionable insights about job applications."},
+                {"role": "system", "content": "You are an expert HR analyst for EDF Trading. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Provide clear, actionable insights about job applications."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.7
+            temperature=0,  # Deterministic scoring - no variation
+            top_p=1  # Disable nucleus sampling for maximum consistency
         )
         
         analysis = response.choices[0].message.content
@@ -193,12 +195,12 @@ def parse_analysis_to_results(analysis, applications):
                 detailed_reasoning = line.replace(f"User {form_id}:", "").strip()
         
         if user_line:
-            # Extract scores from the line
+            # Extract scores from the line (with decimal support)
             import re
-            score_match = re.search(r'Overall Score\s+\*?\*?(\d+)/15', user_line)
-            q4_match = re.search(r'Q4:\s*(\d+)\*', user_line)
-            q6_match = re.search(r'Q6:\s*(\d+)\*', user_line)
-            q7_match = re.search(r'Q7:\s*(\d+)\*', user_line)
+            score_match = re.search(r'Overall Score\s+\*?\*?(\d+\.?\d*)/15', user_line)
+            q4_match = re.search(r'Q4:\s*(\d+\.?\d*)\*', user_line)
+            q6_match = re.search(r'Q6:\s*(\d+\.?\d*)\*', user_line)
+            q7_match = re.search(r'Q7:\s*(\d+\.?\d*)\*', user_line)
             reason_match = re.search(r'-\s*([^*]+?)(?:\*\*)?$', user_line)
             
             overall_score = score_match.group(1) if score_match else 'N/A'

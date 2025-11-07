@@ -74,28 +74,31 @@ def analyze_csv():
         {criteria_text}
 
         Please analyze each application based on the client's specific scoring criteria above.
-        For EACH of the {num_questions} questions, score each candidate from 1-5 stars based on how well their answer matches the criteria:
-        - 1* = Meets 1-star criteria
-        - 2* = Meets 2-star criteria  
-        - 3* = Meets 3-star criteria
-        - 4* = Meets 4-star criteria
-        - 5* = Meets 5-star criteria
+        For EACH of the {num_questions} questions, score each candidate from 1.00-5.00 stars (using 2 decimal places) based on how well their answer matches the criteria:
+        - 1.00-1.99* = Poor match to criteria
+        - 2.00-2.99* = Below average match to criteria  
+        - 3.00-3.99* = Average match to criteria
+        - 4.00-4.99* = Good match to criteria
+        - 5.00* = Excellent match to criteria
+        
+        USE DECIMAL SCORES (e.g., 3.25*, 4.75*, 2.50*) to provide nuanced differentiation between candidates.
 
-        IMPORTANT: Calculate the OVERALL SCORE as the SUM of all {num_questions} individual question scores (max {max_score} stars).
+        IMPORTANT: Calculate the OVERALL SCORE as the SUM of all {num_questions} individual question scores (max {max_score} stars). Express the overall score to 2 decimal places.
 
-        For each candidate, provide the format EXACTLY as shown: 
-        - For 3-question format: "1. **User [number] - Overall Score [X]/15 - Q1: [X]* Q2: [X]* Q3: [X]* - [brief reason]**"
-        - For 6-question format: "1. **User [number] - Overall Score [X]/30 - Q1: [X]* Q2: [X]* Q3: [X]* Q4: [X]* Q5: [X]* Q6: [X]* - [brief reason]**"
-        - For 7-question format: "1. **User [number] - Overall Score **[X]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X]* Q5: Yes/No Q6: [X]* Q7: [X]* - [brief reason]**"
+        For each candidate, provide the format EXACTLY as shown (use decimal scores with 2 decimal places): 
+        - For 3-question format: "1. **User [number] - Overall Score [X.XX]/15 - Q1: [X.XX]* Q2: [X.XX]* Q3: [X.XX]* - [brief reason]**"
+        - For 6-question format: "1. **User [number] - Overall Score [X.XX]/30 - Q1: [X.XX]* Q2: [X.XX]* Q3: [X.XX]* Q4: [X.XX]* Q5: [X.XX]* Q6: [X.XX]* - [brief reason]**"
+        - For 7-question format: "1. **User [number] - Overall Score **[X.XX]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X.XX]* Q5: Yes/No Q6: [X.XX]* Q7: [X.XX]* - [brief reason]**"
         
         IMPORTANT: For 7-question format:
         - DO NOT use brackets around Yes/No answers (write "Q1: Yes" not "Q1: [Yes]")
-        - Only Q4, Q6, and Q7 are scored (1-5*), Q1, Q2, Q3, and Q5 are Yes/No informational questions
+        - Only Q4, Q6, and Q7 are scored (1.00-5.00* with 2 decimals), Q1, Q2, Q3, and Q5 are Yes/No informational questions
         - Use the numbered list format with bold markdown
         
-        After the main analysis, provide detailed reasoning for each user in this format:
-        "DETAILED REASONING:
-        User [number]: [Detailed explanation of why they received this score, including specific examples from their answers and how they align with the scoring criteria]"
+        CRITICAL: The [brief reason] MUST be maximum 1-2 sentences (20-30 words total) - professional but simple, NO question number mentions (don't say Q1, Q4, Q6, etc).
+        Examples:
+        - "Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth."
+        - "Shows a general idea of the role but lacks depth. Drawn to the market position but could've tied in more specifics."
         
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
@@ -103,11 +106,12 @@ def analyze_csv():
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert HR analyst. Provide clear, actionable insights about job applications."},
+                {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.7
+            temperature=0,  # Deterministic scoring - no variation
+            top_p=1  # Disable nucleus sampling for maximum consistency
         )
         
         analysis = response.choices[0].message.content
@@ -204,7 +208,7 @@ def webhook_submit():
         # Add supporting references if provided
         supporting_text = f"\n\nSupporting References:\n{supporting_references}" if supporting_references else ""
         
-        prompt = f"""Analyze the following job applications for {client}:
+        prompt = f"""You are an early careers recruitment analyst. Analyze the following job applications for {client}:
 
         Job Description: {job_description}{supporting_text}
 
@@ -217,28 +221,31 @@ def webhook_submit():
         {criteria_text}
 
         Please analyze each application based on the client's specific scoring criteria above.
-        For EACH of the {num_questions} questions, score each candidate from 1-5 stars based on how well their answer matches the criteria:
-        - 1* = Meets 1-star criteria
-        - 2* = Meets 2-star criteria  
-        - 3* = Meets 3-star criteria
-        - 4* = Meets 4-star criteria
-        - 5* = Meets 5-star criteria
+        For EACH of the {num_questions} questions, score each candidate from 1.00-5.00 stars (using 2 decimal places) based on how well their answer matches the criteria:
+        - 1.00-1.99* = Poor match to criteria
+        - 2.00-2.99* = Below average match to criteria  
+        - 3.00-3.99* = Average match to criteria
+        - 4.00-4.99* = Good match to criteria
+        - 5.00* = Excellent match to criteria
+        
+        USE DECIMAL SCORES (e.g., 3.25*, 4.75*, 2.50*) to provide nuanced differentiation between candidates.
 
-        IMPORTANT: Calculate the OVERALL SCORE as the SUM of all {num_questions} individual question scores (max {max_score} stars).
+        IMPORTANT: Calculate the OVERALL SCORE as the SUM of all {num_questions} individual question scores (max {max_score} stars). Express the overall score to 2 decimal places.
 
-        For each candidate, provide the format EXACTLY as shown: 
-        - For 3-question format: "1. **User [number] - Overall Score [X]/15 - Q1: [X]* Q2: [X]* Q3: [X]* - [brief reason]**"
-        - For 6-question format: "1. **User [number] - Overall Score [X]/30 - Q1: [X]* Q2: [X]* Q3: [X]* Q4: [X]* Q5: [X]* Q6: [X]* - [brief reason]**"
-        - For 7-question format: "1. **User [number] - Overall Score **[X]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X]* Q5: Yes/No Q6: [X]* Q7: [X]* - [brief reason]**"
+        For each candidate, provide the format EXACTLY as shown (use decimal scores with 2 decimal places): 
+        - For 3-question format: "1. **User [number] - Overall Score [X.XX]/15 - Q1: [X.XX]* Q2: [X.XX]* Q3: [X.XX]* - [brief reason]**"
+        - For 6-question format: "1. **User [number] - Overall Score [X.XX]/30 - Q1: [X.XX]* Q2: [X.XX]* Q3: [X.XX]* Q4: [X.XX]* Q5: [X.XX]* Q6: [X.XX]* - [brief reason]**"
+        - For 7-question format: "1. **User [number] - Overall Score **[X.XX]/15** - Q1: Yes/No Q2: Yes/No Q3: Yes/No Q4: [X.XX]* Q5: Yes/No Q6: [X.XX]* Q7: [X.XX]* - [brief reason]**"
         
         IMPORTANT: For 7-question format:
         - DO NOT use brackets around Yes/No answers (write "Q1: Yes" not "Q1: [Yes]")
-        - Only Q4, Q6, and Q7 are scored (1-5*), Q1, Q2, Q3, and Q5 are Yes/No informational questions
+        - Only Q4, Q6, and Q7 are scored (1.00-5.00* with 2 decimals), Q1, Q2, Q3, and Q5 are Yes/No informational questions
         - Use the numbered list format with bold markdown
         
-        After the main analysis, provide detailed reasoning for each user in this format:
-        "DETAILED REASONING:
-        User [number]: [Detailed explanation of why they received this score, including specific examples from their answers and how they align with the scoring criteria]"
+        CRITICAL: The [brief reason] MUST be maximum 1-2 sentences (20-30 words total) - professional but simple, NO question number mentions (don't say Q1, Q4, Q6, etc).
+        Examples:
+        - "Has a solid grasp of the role, dives into quantitative aspects. Excited about the hands-on learning and ties in personal growth."
+        - "Shows a general idea of the role but lacks depth. Drawn to the market position but could've tied in more specifics."
         
         Add a short summary of the analysis at the end for each user - keep within one line"""
 
@@ -246,11 +253,12 @@ def webhook_submit():
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert HR analyst. Provide clear, actionable insights about job applications."},
+                {"role": "system", "content": "You are an early careers recruiter. CRITICAL: Use decimal scores with EXACTLY 2 decimal places (e.g., 3.75*, 4.25*, 12.50/15). Write brief reasons that are professional but simple - natural flow, NO question number mentions (don't say Q1, Q4, Q6, etc). Every candidate analysis must be completely unique - no templates, no copy-paste phrases. Keep brief reasons SHORT - 1-2 sentences max (20-30 words)."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=4000,
-            temperature=0.7
+            temperature=0,  # Deterministic scoring - no variation
+            top_p=1  # Disable nucleus sampling for maximum consistency
         )
         
         analysis = response.choices[0].message.content
