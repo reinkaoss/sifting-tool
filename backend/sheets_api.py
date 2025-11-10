@@ -38,8 +38,38 @@ def average_analysis_scores_sheets(analyses):
                 if row_num not in all_row_scores:
                     all_row_scores[row_num] = {}
                 
-                # Extract overall score
-                overall_match = re.search(r'Overall Score[*\s]+(\d+\.?\d*)/(\d+)', line)
+                # Extract overall score - try multiple patterns (with and without /max_score)
+                overall_score = 0
+                max_score_val = 15  # default
+                
+                # Try pattern with double asterisks and max score
+                overall_match = re.search(r'Overall Score[*\s]+\*\*(\d+\.?\d*)/(\d+)\*\*', line)
+                if overall_match:
+                    overall_score = float(overall_match.group(1))
+                    max_score_val = int(overall_match.group(2))
+                else:
+                    # Try pattern with single asterisks and max score
+                    overall_match = re.search(r'Overall Score[*\s]+\*(\d+\.?\d*)/(\d+)\*', line)
+                    if overall_match:
+                        overall_score = float(overall_match.group(1))
+                        max_score_val = int(overall_match.group(2))
+                    else:
+                        # Try pattern with max score but no asterisks
+                        overall_match = re.search(r'Overall Score[*\s]+(\d+\.?\d*)/(\d+)', line)
+                        if overall_match:
+                            overall_score = float(overall_match.group(1))
+                            max_score_val = int(overall_match.group(2))
+                        else:
+                            # Try pattern without max score
+                            overall_match = re.search(r'Overall Score[*\s]+(\d+\.?\d*)', line)
+                            if overall_match:
+                                overall_score = float(overall_match.group(1))
+                            
+                            # Also try pattern with double asterisks but no max score
+                            if not overall_match:
+                                overall_match = re.search(r'Overall Score[*\s]+\*\*(\d+\.?\d*)\*\*', line)
+                                if overall_match:
+                                    overall_score = float(overall_match.group(1))
                 
                 # Extract individual question scores
                 q_scores = {}
@@ -55,8 +85,8 @@ def average_analysis_scores_sheets(analyses):
                             q_scores[f'q{q_num}'] = yesno_match.group(1)
                 
                 all_row_scores[row_num][run_idx] = {
-                    'overall': float(overall_match.group(1)) if overall_match else 0,
-                    'max_score': int(overall_match.group(2)) if overall_match else 15,
+                    'overall': overall_score,
+                    'max_score': max_score_val,
                     'questions': q_scores
                 }
     
@@ -355,7 +385,12 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                 start_col = 22
                 
                 # Build values array: Overall Score, then all Q1-QN scores, then metadata
-                values_row = [scores.get('overall_score', '')]
+                # Ensure overall_score doesn't contain "/max_score" - strip it if present
+                overall_score_value = scores.get('overall_score', '')
+                if isinstance(overall_score_value, str) and '/' in overall_score_value:
+                    overall_score_value = overall_score_value.split('/')[0].strip()
+                
+                values_row = [overall_score_value]
                 
                 # Add all question scores dynamically (Q1, Q2, Q3, Q4, Q5, Q6, Q7, etc.)
                 for q_num in range(1, question_count + 1):
@@ -382,6 +417,7 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                         values_row.append(q_formula)
                 
                 # Get the 3 individual overall scores for debugging
+                # IMPORTANT: Only write numeric scores, never the old format
                 row_num_str = str(row_num)
                 overall_score_1 = ""
                 overall_score_2 = ""
@@ -389,10 +425,25 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                 
                 if row_num_str in raw_scores_by_row:
                     raw = raw_scores_by_row[row_num_str]
-                    if 'overall' in raw and len(raw['overall']) >= 3:
-                        overall_score_1 = f"{raw['overall'][0]:.2f}"
-                        overall_score_2 = f"{raw['overall'][1]:.2f}"
-                        overall_score_3 = f"{raw['overall'][2]:.2f}"
+                    if 'overall' in raw and isinstance(raw['overall'], list):
+                        overall_list = raw['overall']
+                        
+                        # Filter out any non-numeric values
+                        numeric_scores = [s for s in overall_list if isinstance(s, (int, float))]
+                        
+                        # Only write the first 3 numeric scores
+                        if len(numeric_scores) >= 1:
+                            overall_score_1 = f"{float(numeric_scores[0]):.2f}"
+                        if len(numeric_scores) >= 2:
+                            overall_score_2 = f"{float(numeric_scores[1]):.2f}"
+                        if len(numeric_scores) >= 3:
+                            overall_score_3 = f"{float(numeric_scores[2]):.2f}"
+                    else:
+                        print(f"Warning: Row {row_num} - 'overall' not found in raw_scores_by_row or is not a list")
+                        print(f"  Available keys: {list(raw.keys()) if row_num_str in raw_scores_by_row else 'Row not found'}")
+                else:
+                    print(f"Warning: Row {row_num} not found in raw_scores_by_row")
+                    print(f"  Available row numbers: {list(raw_scores_by_row.keys())}")
                 
                 # Add metadata columns
                 values_row.extend([
@@ -400,9 +451,9 @@ def analyze_and_write_to_sheet(selected_rows, client, job_description, supportin
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     client,
                     job_description,
-                    overall_score_1,
-                    overall_score_2,
-                    overall_score_3
+                    overall_score_1,  # Only numeric score, e.g., "10.00"
+                    overall_score_2,  # Only numeric score, e.g., "10.50"
+                    overall_score_3   # Only numeric score, e.g., "11.00"
                 ])
                 
                 # Calculate end column (start_col + overall_score + question_count + metadata)
@@ -1072,8 +1123,12 @@ def extract_scores_for_row(analysis, row_number, all_values, client_criteria=Non
             if score_match:
                 try:
                     score_value = score_match.group(1)
+                    # Strip out any "/max_score" pattern that might be included
+                    # Also handle cases where the value might be "10.00/15" instead of just "10.00"
+                    if '/' in str(score_value):
+                        score_value = str(score_value).split('/')[0]
                     # Just show the score value without "/max_score"
-                    overall_score_str = score_value
+                    overall_score_str = score_value.strip()
                 except Exception as e:
                     print(f"Error extracting overall score for Row {row_number}: {e}")
                     print(f"Line content: {line[:200]}")
