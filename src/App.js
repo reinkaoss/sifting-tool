@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import './App.css';
 
 // Use environment variable for API URL, fallback to localhost for development
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// On Vercel, use /api (relative URL) since API routes are at /api/*
+// For local development, use http://localhost:5000
+const API_URL = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 
 function App() {
   const [selectedClient, setSelectedClient] = useState('');
@@ -12,8 +14,11 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [sheetApplications, setSheetApplications] = useState([]);
+  const [analyzedApplications, setAnalyzedApplications] = useState([]);
   const [selectedSheetRows, setSelectedSheetRows] = useState([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [loadingAnalyzed, setLoadingAnalyzed] = useState(false);
+  const [activeTab, setActiveTab] = useState('unanalyzed'); // 'unanalyzed' or 'analyzed'
   const [failedApplications, setFailedApplications] = useState([]);
   const [showFailedModal, setShowFailedModal] = useState(false);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('https://docs.google.com/spreadsheets/d/1jDJDQXPoZE6NTAqfTaCILv8ULXpM_vl5WeiEVSplChU/edit?gid=0#gid=0');
@@ -177,6 +182,39 @@ function App() {
     }
   };
 
+  const loadAnalyzedApplications = async () => {
+    const sheetId = extractSheetId(spreadsheetUrl);
+    const gid = extractGid(spreadsheetUrl);
+    
+    if (!sheetId) {
+      addTerminalLog('Error: Invalid spreadsheet URL');
+      return;
+    }
+
+    setLoadingAnalyzed(true);
+    addTerminalLog(`Loading analyzed applications from Google Sheets (tab gid=${gid})...`);
+    
+    try {
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${API_URL}/sheets/analyzed?sheetId=${sheetId}&gid=${gid}&_t=${timestamp}`, {
+        cache: 'no-store'
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        setAnalyzedApplications(result.applications);
+        addTerminalLog(`✅ Loaded ${result.count} analyzed applications from Google Sheets`);
+      } else {
+        addTerminalLog('Error loading analyzed applications: ' + result.error);
+      }
+    } catch (error) {
+      addTerminalLog(`Error loading analyzed applications: ${error.message}`);
+      console.error('Loading error:', error);
+    } finally {
+      setLoadingAnalyzed(false);
+    }
+  };
+
   const toggleSheetRowSelection = (rowNumber) => {
     if (selectedSheetRows.includes(rowNumber)) {
       setSelectedSheetRows(selectedSheetRows.filter(r => r !== rowNumber));
@@ -309,64 +347,79 @@ function App() {
     setIsProcessing(true);
     setProcessingProgress(0);
 
-    const BATCH_SIZE = 10; // Batch size to avoid serverless timeout
-    const totalApplications = selectedSheetRows.length;
-    
-    // Check if we need to batch (10+ applications)
-    if (totalApplications >= BATCH_SIZE) {
-      addTerminalLog(`📦 Batching ${totalApplications} applications into groups of ${BATCH_SIZE} to avoid timeout...`);
+    try {
+      const BATCH_SIZE = 10; // Batch size to avoid serverless timeout
+      const totalApplications = selectedSheetRows.length;
       
-      // Split into batches
-      const batches = [];
-      for (let i = 0; i < selectedSheetRows.length; i += BATCH_SIZE) {
-        batches.push(selectedSheetRows.slice(i, i + BATCH_SIZE));
-      }
-      
-      addTerminalLog(`Created ${batches.length} batches`);
-      
-      let totalAnalyzed = 0;
-      let allFailedApplications = [];
-      
-      try {
-        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-          const batch = batches[batchIndex];
-          const batchNum = batchIndex + 1;
-          
-          addTerminalLog(`\n🔄 Processing batch ${batchNum}/${batches.length} (${batch.length} applications)...`);
-          setProcessingProgress((batchNum / batches.length) * 90);
-          
-          try {
-            const response = await fetch(`${API_URL}/sheets/analyze`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                selectedRows: batch,
-                client: selectedClient,
-                jobDescription: jobDescription,
-                supportingReferences: supportingReferences,
-                sheetId: sheetId,
-                gid: gid
-              })
-            });
-
-            if (!response.ok) {
-              throw new Error(`Batch ${batchNum} failed: ${response.status}`);
-            }
-
-            const result = await response.json();
+      // Check if we need to batch (10+ applications)
+      if (totalApplications >= BATCH_SIZE) {
+        addTerminalLog(`📦 Batching ${totalApplications} applications into groups of ${BATCH_SIZE} to avoid timeout...`);
+        
+        // Split into batches
+        const batches = [];
+        for (let i = 0; i < selectedSheetRows.length; i += BATCH_SIZE) {
+          batches.push(selectedSheetRows.slice(i, i + BATCH_SIZE));
+        }
+        
+        addTerminalLog(`Created ${batches.length} batches`);
+        
+        let totalAnalyzed = 0;
+        let allFailedApplications = [];
+        
+        try {
+          for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex];
+            const batchNum = batchIndex + 1;
             
-            if (result.success) {
-              totalAnalyzed += result.analyzed_count;
-              addTerminalLog(`✅ Batch ${batchNum} complete: ${result.analyzed_count} analyzed, ${result.failed_count} failed`);
-              
-              // Collect failed applications
-              if (result.failed && result.failed.length > 0) {
-                allFailedApplications = [...allFailedApplications, ...result.failed];
+            addTerminalLog(`\n🔄 Processing batch ${batchNum}/${batches.length} (${batch.length} applications)...`);
+            setProcessingProgress((batchNum / batches.length) * 90);
+            
+            try {
+              const response = await fetch(`${API_URL}/sheets/analyze`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  selectedRows: batch,
+                  client: selectedClient,
+                  jobDescription: jobDescription,
+                  supportingReferences: supportingReferences,
+                  sheetId: sheetId,
+                  gid: gid
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`Batch ${batchNum} failed: ${response.status}`);
               }
-            } else {
-              addTerminalLog(`❌ Batch ${batchNum} error: ${result.error}`);
+
+              const result = await response.json();
+              
+              if (result.success) {
+                totalAnalyzed += result.analyzed_count;
+                addTerminalLog(`✅ Batch ${batchNum} complete: ${result.analyzed_count} analyzed, ${result.failed_count} failed`);
+                
+                // Collect failed applications
+                if (result.failed && result.failed.length > 0) {
+                  allFailedApplications = [...allFailedApplications, ...result.failed];
+                }
+              } else {
+                addTerminalLog(`❌ Batch ${batchNum} error: ${result.error}`);
+                // Add all batch rows to failed
+                batch.forEach(row => {
+                  const app = sheetApplications.find(a => a.row_number === row);
+                  if (app) {
+                    allFailedApplications.push({
+                      row: row,
+                      name: `${app.first_name} ${app.surname}`,
+                      error: result.error || 'Batch processing failed'
+                    });
+                  }
+                });
+              }
+            } catch (error) {
+              addTerminalLog(`❌ Batch ${batchNum} error: ${error.message}`);
               // Add all batch rows to failed
               batch.forEach(row => {
                 const app = sheetApplications.find(a => a.row_number === row);
@@ -374,49 +427,129 @@ function App() {
                   allFailedApplications.push({
                     row: row,
                     name: `${app.first_name} ${app.surname}`,
-                    error: result.error || 'Batch processing failed'
+                    error: error.message
                   });
                 }
               });
             }
-          } catch (error) {
-            addTerminalLog(`❌ Batch ${batchNum} error: ${error.message}`);
-            // Add all batch rows to failed
-            batch.forEach(row => {
-              const app = sheetApplications.find(a => a.row_number === row);
-              if (app) {
-                allFailedApplications.push({
-                  row: row,
-                  name: `${app.first_name} ${app.surname}`,
-                  error: error.message
-                });
-              }
-            });
           }
+          
+          setProcessingProgress(100);
+          addTerminalLog(`\n🎉 All batches complete! ${totalAnalyzed} applications analyzed total`);
+          
+          // Show failed applications modal if any failed
+          if (allFailedApplications.length > 0) {
+            setFailedApplications(allFailedApplications);
+            setShowFailedModal(true);
+          }
+          
+          // Reload to show remaining unanalyzed and update analyzed list
+          await loadFromGoogleSheets();
+          if (activeTab === 'analyzed') {
+            await loadAnalyzedApplications();
+          }
+          setSelectedSheetRows([]);
+          
+        } catch (error) {
+          addTerminalLog(`Error during batch processing: ${error.message}`);
         }
         
-        setProcessingProgress(100);
-        addTerminalLog(`\n🎉 All batches complete! ${totalAnalyzed} applications analyzed total`);
+      } else {
+        // Single batch (less than 10 applications)
+        addTerminalLog(`Analyzing ${totalApplications} selected applications...`);
         
-        // Show failed applications modal if any failed
-        if (allFailedApplications.length > 0) {
-          setFailedApplications(allFailedApplications);
-          setShowFailedModal(true);
+        try {
+          const progressInterval = setInterval(() => {
+            setProcessingProgress(prev => {
+              if (prev >= 90) return prev;
+              return prev + Math.random() * 10;
+            });
+          }, 500);
+
+          const response = await fetch(`${API_URL}/sheets/analyze`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              selectedRows: selectedSheetRows,
+              client: selectedClient,
+              jobDescription: jobDescription,
+              supportingReferences: supportingReferences,
+              sheetId: sheetId,
+              gid: gid
+            })
+          });
+
+          clearInterval(progressInterval);
+          setProcessingProgress(100);
+
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status}`);
+          }
+
+          const result = await response.json();
+          
+          if (result.success) {
+            addTerminalLog(`✅ Analysis complete! ${result.analyzed_count} applications analyzed and written to Google Sheets`);
+            
+            // Check for failed applications
+            if (result.failed_count > 0) {
+              setFailedApplications(result.failed);
+              setShowFailedModal(true);
+              addTerminalLog(`⚠️ Warning: ${result.failed_count} applications failed to analyze`);
+            }
+            
+            // Refresh the lists
+            await loadFromGoogleSheets();
+            if (activeTab === 'analyzed') {
+              await loadAnalyzedApplications();
+            }
+            setSelectedSheetRows([]);
+            
+            // Show success summary
+            const summary = result.results.map(r => `Row ${r.row}: ${r.name} - ${r.score}`).join('\n');
+            addTerminalLog(`Results:\n${summary}`);
+          } else {
+            throw new Error(result.error || 'Analysis failed');
+          }
+        } catch (error) {
+          addTerminalLog(`Error during analysis: ${error.message}`);
         }
-        
-        // Reload to show remaining unanalyzed
-        await loadFromGoogleSheets();
-        setSelectedSheetRows([]);
-        
-      } catch (error) {
-        addTerminalLog(`Error during batch processing: ${error.message}`);
       }
-      
-    } else {
-      // Single batch (less than 10 applications)
-      addTerminalLog(`Analyzing ${totalApplications} selected applications...`);
-      
-      try {
+    } finally {
+      setIsProcessing(false);
+      setProcessingProgress(0);
+    }
+  };
+
+  // AI Detection function for analyzed applications - runs TypeTruth on selected rows
+  const detectAIForSelected = async () => {
+    if (selectedSheetRows.length === 0) {
+      addTerminalLog('Error: Please select at least one application');
+      return;
+    }
+
+    if (activeTab !== 'analyzed') {
+      addTerminalLog('Error: AI detection is only available for analyzed applications');
+      return;
+    }
+
+    const sheetId = extractSheetId(spreadsheetUrl);
+    const gid = extractGid(spreadsheetUrl);
+    
+    if (!sheetId) {
+      addTerminalLog('Error: Invalid spreadsheet URL');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessingProgress(0);
+
+    const totalApplications = selectedSheetRows.length;
+    addTerminalLog(`🔍 Running AI detection on ${totalApplications} selected applications...`);
+
+    try {
       const progressInterval = setInterval(() => {
         setProcessingProgress(prev => {
           if (prev >= 90) return prev;
@@ -424,18 +557,15 @@ function App() {
         });
       }, 500);
 
-        const response = await fetch(`${API_URL}/sheets/analyze`, {
+      const response = await fetch(`${API_URL}/sheets/ai-detection`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            selectedRows: selectedSheetRows,
-          client: selectedClient,
-          jobDescription: jobDescription,
-          supportingReferences: supportingReferences,
-            sheetId: sheetId,
-            gid: gid
+          selectedRows: selectedSheetRows,
+          sheetId: sheetId,
+          gid: gid
         })
       });
 
@@ -448,33 +578,39 @@ function App() {
 
       const result = await response.json();
       
-        if (result.success) {
-          addTerminalLog(`✅ Analysis complete! ${result.analyzed_count} applications analyzed and written to Google Sheets`);
-          
-          // Check for failed applications
-          if (result.failed_count > 0) {
-            setFailedApplications(result.failed);
-            setShowFailedModal(true);
-            addTerminalLog(`⚠️ Warning: ${result.failed_count} applications failed to analyze`);
+      if (result.success) {
+        addTerminalLog(`✅ AI detection complete! ${result.detected_count} applications analyzed and written to Google Sheets`);
+        
+        // Check for failed applications
+        if (result.failed_count > 0) {
+          addTerminalLog(`⚠️ Warning: ${result.failed_count} applications failed AI detection`);
+          if (result.failed && result.failed.length > 0) {
+            result.failed.forEach(failed => {
+              addTerminalLog(`  ❌ Row ${failed.row}: ${failed.error}`);
+            });
           }
-          
-          // Refresh the list to remove analyzed applications
-          await loadFromGoogleSheets();
-          setSelectedSheetRows([]);
-          
-          // Show success summary
-          const summary = result.results.map(r => `Row ${r.row}: ${r.name} - ${r.score}`).join('\n');
-          addTerminalLog(`Results:\n${summary}`);
-        } else {
-        throw new Error(result.error || 'Analysis failed');
         }
-      } catch (error) {
-        addTerminalLog(`Error during analysis: ${error.message}`);
+        
+        // Show results
+        if (result.results && result.results.length > 0) {
+          result.results.forEach(res => {
+            addTerminalLog(`  ✅ Row ${res.row}: AI % = ${res.ai_percentage}`);
+          });
+        }
+        
+        // Refresh the analyzed list to show updated data
+        await loadAnalyzedApplications();
+        setSelectedSheetRows([]);
+      } else {
+        throw new Error(result.error || 'AI detection failed');
       }
-    }
-    
+    } catch (error) {
+      addTerminalLog(`Error during AI detection: ${error.message}`);
+      console.error('AI detection error:', error);
+    } finally {
       setIsProcessing(false);
       setProcessingProgress(0);
+    }
   };
 
   return (
@@ -501,17 +637,71 @@ function App() {
 
           {/* Google Sheets Button */}
           <button 
-            onClick={loadFromGoogleSheets}
+            onClick={() => {
+              if (activeTab === 'unanalyzed') {
+                loadFromGoogleSheets();
+              } else {
+                loadAnalyzedApplications();
+              }
+            }}
             className="sheets-button"
-            disabled={loadingSheets}
+            disabled={loadingSheets || loadingAnalyzed}
             style={{marginBottom: '20px', width: '100%', padding: '12px', backgroundColor: '#34A853', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px'}}
           >
-            {loadingSheets ? '⏳ Loading...' : '📊 Load from Google Sheets'}
+            {loadingSheets || loadingAnalyzed ? '⏳ Loading...' : '📊 Load from Google Sheets'}
           </button>
 
-          {/* Show Google Sheets applications if loaded */}
-          {sheetApplications.length > 0 && (
-            <div className="sheets-applications" style={{marginBottom: '20px', maxHeight: '400px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px', padding: '10px'}}>
+          {/* Tabs */}
+          <div style={{display: 'flex', marginBottom: '15px', borderBottom: '2px solid #ddd'}}>
+            <button
+              onClick={() => {
+                setActiveTab('unanalyzed');
+                setSelectedSheetRows([]);
+                if (sheetApplications.length === 0) {
+                  loadFromGoogleSheets();
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '10px',
+                backgroundColor: activeTab === 'unanalyzed' ? '#4285F4' : '#f0f0f0',
+                color: activeTab === 'unanalyzed' ? 'white' : '#333',
+                border: 'none',
+                borderTopLeftRadius: '4px',
+                borderTopRightRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'unanalyzed' ? 'bold' : 'normal'
+              }}
+            >
+              Unanalyzed ({sheetApplications.length})
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('analyzed');
+                setSelectedSheetRows([]);
+                if (analyzedApplications.length === 0) {
+                  loadAnalyzedApplications();
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '10px',
+                backgroundColor: activeTab === 'analyzed' ? '#4285F4' : '#f0f0f0',
+                color: activeTab === 'analyzed' ? 'white' : '#333',
+                border: 'none',
+                borderTopLeftRadius: '4px',
+                borderTopRightRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'analyzed' ? 'bold' : 'normal'
+              }}
+            >
+              Analyzed ({analyzedApplications.length})
+            </button>
+          </div>
+
+          {/* Show Google Sheets applications based on active tab */}
+          {activeTab === 'unanalyzed' && sheetApplications.length > 0 && (
+            <div className="sheets-applications" style={{marginBottom: '20px', maxHeight: 'max-content', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px', padding: '10px'}}>
               <div style={{marginBottom: '10px', fontWeight: 'bold'}}>
                 {sheetApplications.length} Unanalyzed Applications
                 <button 
@@ -526,7 +716,7 @@ function App() {
               </div>
               {sheetApplications.map(app => (
                 <div key={app.row_number} style={{display: 'flex', alignItems: 'center', padding: '8px', borderBottom: '1px solid #eee', cursor: 'pointer'}} onClick={() => toggleSheetRowSelection(app.row_number)}>
-              <input
+                  <input
                     type="checkbox" 
                     checked={selectedSheetRows.includes(app.row_number)}
                     onChange={() => toggleSheetRowSelection(app.row_number)}
@@ -538,8 +728,54 @@ function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {activeTab === 'analyzed' && analyzedApplications.length > 0 && (
+            <div className="sheets-applications" style={{marginBottom: '20px', maxHeight: 'max-content', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px', padding: '10px'}}>
+              <div style={{marginBottom: '10px', fontWeight: 'bold'}}>
+                {analyzedApplications.length} Analyzed Applications
+                <button 
+                  onClick={() => {
+                    const allRows = analyzedApplications.map(app => app.row_number);
+                    setSelectedSheetRows(selectedSheetRows.length === allRows.length ? [] : allRows);
+                  }}
+                  style={{marginLeft: '10px', padding: '4px 8px', fontSize: '12px'}}
+                >
+                  {selectedSheetRows.length === analyzedApplications.length ? 'Deselect All' : 'Select All'}
+                </button>
               </div>
-            )}
+              {analyzedApplications.map(app => (
+                <div key={app.row_number} style={{display: 'flex', alignItems: 'center', padding: '8px', borderBottom: '1px solid #eee', cursor: 'pointer'}} onClick={() => toggleSheetRowSelection(app.row_number)}>
+                  <input
+                    type="checkbox" 
+                    checked={selectedSheetRows.includes(app.row_number)}
+                    onChange={() => toggleSheetRowSelection(app.row_number)}
+                    style={{marginRight: '10px'}}
+                  />
+                  <div style={{flex: 1}}>
+                    <div style={{fontWeight: 'bold'}}>{app.first_name} {app.surname}</div>
+                    <div style={{fontSize: '12px', color: '#666'}}>{app.university} - {app.course}</div>
+                  </div>
+                  <div style={{marginLeft: '10px', fontWeight: 'bold', color: '#4285F4', fontSize: '16px'}}>
+                    {app.overall_score}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'unanalyzed' && sheetApplications.length === 0 && !loadingSheets && (
+            <div style={{padding: '20px', textAlign: 'center', color: '#666'}}>
+              No unanalyzed applications. Click "Load from Google Sheets" to fetch them.
+            </div>
+          )}
+
+          {activeTab === 'analyzed' && analyzedApplications.length === 0 && !loadingAnalyzed && (
+            <div style={{padding: '20px', textAlign: 'center', color: '#666'}}>
+              No analyzed applications found. Click "Load from Google Sheets" to fetch them.
+            </div>
+          )}
         </div>
 
         {/* Second Column - Client & Job Description */}
@@ -615,9 +851,18 @@ function App() {
             <button
               onClick={analyzeSelectedSheets}
               className="process-button"
-              disabled={selectedSheetRows.length === 0 || !selectedClient || !jobDescription}
+              disabled={selectedSheetRows.length === 0 || !selectedClient || !jobDescription || activeTab === 'analyzed'}
+              style={{display: activeTab === 'analyzed' ? 'none' : 'block'}}
             >
               {`Analyze ${selectedSheetRows.length} Selected`}
+            </button>
+            <button
+              onClick={detectAIForSelected}
+              className="process-button"
+              disabled={selectedSheetRows.length === 0 || activeTab === 'unanalyzed' || isProcessing}
+              style={{display: activeTab === 'unanalyzed' ? 'none' : 'block', marginTop: '10px'}}
+            >
+              {isProcessing ? `Detecting AI...` : `Detect AI % (${selectedSheetRows.length} Selected)`}
             </button>
           </div>
         </div>

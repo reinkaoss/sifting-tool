@@ -293,6 +293,26 @@ def get_unanalyzed():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/sheets/analyzed', methods=['GET'])
+def get_analyzed():
+    """Get all analyzed applications from Google Sheets"""
+    try:
+        from sheets_api import get_analyzed_applications
+        sheet_id = request.args.get('sheetId')
+        gid = request.args.get('gid')
+        print(f"Fetching analyzed applications from sheetId={sheet_id}, gid={gid}")
+        applications = get_analyzed_applications(sheet_id, gid)
+        return jsonify({
+            'success': True,
+            'count': len(applications),
+            'applications': applications
+        }), 200
+    except Exception as e:
+        print(f"Error getting analyzed applications: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/sheets/analyze', methods=['POST'])
 def analyze_sheets():
     """Analyze selected applications and write back to Google Sheets"""
@@ -320,6 +340,34 @@ def analyze_sheets():
         
     except Exception as e:
         print(f"Error analyzing applications: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sheets/ai-detection', methods=['POST'])
+def detect_ai_sheets():
+    """Run AI detection on selected analyzed applications and write AI % to Google Sheets"""
+    try:
+        from sheets_api import detect_ai_and_write_to_sheet
+        
+        data = request.json
+        selected_rows = data.get('selectedRows', [])
+        sheet_id = data.get('sheetId')
+        gid = data.get('gid')
+        
+        if not selected_rows:
+            return jsonify({'error': 'No rows selected'}), 400
+        
+        print(f"Running AI detection for sheetId={sheet_id}, gid={gid}, rows={selected_rows}")
+        result = detect_ai_and_write_to_sheet(selected_rows, sheet_id, gid)
+        
+        if 'error' in result:
+            return jsonify(result), 500
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        print(f"Error running AI detection: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

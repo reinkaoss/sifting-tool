@@ -388,7 +388,7 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  margin-top: auto;
+  margin-top: 10px;
 }
 
 .process-button:hover:not(:disabled) {

@@ -21,3 +21,13 @@ dist/
 GOOGLE_CREDENTIALS_BASE64.txt
 base64_only.txt
 NEW_GOOGLE_CREDENTIALS_BASE64.txt
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# TypeTruth-main - completely ignore (we use GPT-4 with TypeTruth's chunking logic instead)
+TypeTruth-main/

@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime
 import re
+import sys
+import pandas as pd
 
 load_dotenv()
 
@@ -255,6 +257,93 @@ def get_unanalyzed_applications(sheet_id=None, gid=None):
             unanalyzed.append(application)
     
     return unanalyzed
+
+def get_analyzed_applications(sheet_id=None, gid=None):
+    """
+    Get all applications that have been analyzed (column V has data) but don't have AI % yet
+    Returns list of applications with row numbers, names, and overall scores
+    Excludes rows that already have AI % to avoid re-processing
+    """
+    spreadsheet = get_spreadsheet(sheet_id)
+    
+    # Get worksheet by gid if provided, otherwise use first sheet
+    if gid:
+        try:
+            # Find worksheet by gid
+            worksheet = None
+            for sheet in spreadsheet.worksheets():
+                if str(sheet.id) == str(gid):
+                    worksheet = sheet
+                    break
+            if not worksheet:
+                print(f"Warning: Worksheet with gid={gid} not found, using first sheet")
+                worksheet = spreadsheet.get_worksheet(0)
+        except Exception as e:
+            print(f"Error finding worksheet by gid: {e}, using first sheet")
+            worksheet = spreadsheet.get_worksheet(0)
+    else:
+        worksheet = spreadsheet.get_worksheet(0)
+    
+    print(f"Using worksheet: {worksheet.title} (id: {worksheet.id})")
+    
+    all_values = worksheet.get_all_values()
+    headers = all_values[0]
+    
+    # Column V is column 22 (index 21) - Overall Score
+    # Column C is column 3 (index 2) - First Name
+    # Column D is column 4 (index 3) - Surname
+    OVERALL_SCORE_COL = 21  # Column V (0-indexed)
+    FIRST_NAME_COL = 2      # Column C (0-indexed)
+    SURNAME_COL = 3          # Column D (0-indexed)
+    
+    # Determine question count from headers to calculate AI % column position
+    question_count = 7  # default
+    if headers:
+        q_count = 0
+        for header in headers:
+            if header.startswith('Q') and header[1:].isdigit():
+                q_count = max(q_count, int(header[1:]))
+        if q_count > 0:
+            question_count = q_count
+    
+    # Calculate AI % column position (same logic as ensure_ai_column_header)
+    # Columns: Overall Score (1) + Q1-QN (question_count) + metadata (7) = 8 + question_count
+    # Start at column 22, so AI % is at column 22 + 8 + question_count - 1 (0-indexed)
+    start_col = 22
+    ai_col_index_1based = start_col + 8 + question_count
+    ai_col_index_0based = ai_col_index_1based - 1
+    
+    analyzed = []
+    
+    for row_idx, row in enumerate(all_values[1:], start=2):  # Start from row 2 (skip header)
+        # Check if column V (Overall Score) has data
+        has_score = len(row) > OVERALL_SCORE_COL and row[OVERALL_SCORE_COL].strip()
+        
+        if has_score and row:  # Has data and has analysis
+            # Check if AI % column already has data (skip if it does)
+            if len(row) > ai_col_index_0based:
+                ai_percentage_value = row[ai_col_index_0based].strip()
+                if ai_percentage_value:
+                    # Skip this row - it already has AI %
+                    continue
+            
+            # Extract overall score (just the number, no "/15")
+            overall_score = row[OVERALL_SCORE_COL].strip()
+            # Remove "/max_score" if present
+            if '/' in overall_score:
+                overall_score = overall_score.split('/')[0].strip()
+            
+            application = {
+                'row_number': row_idx,
+                'first_name': row[FIRST_NAME_COL] if len(row) > FIRST_NAME_COL else '',
+                'surname': row[SURNAME_COL] if len(row) > SURNAME_COL else '',
+                'overall_score': overall_score,
+                'university': row[7] if len(row) > 7 else '',  # Col H
+                'course': row[8] if len(row) > 8 else '',  # Col I
+            }
+            analyzed.append(application)
+    
+    return analyzed
 
 def column_index_to_letter(n):
     """Convert a 1-based column index to Excel column letter (1=A, 2=B, ..., 27=AA, etc.)"""
@@ -1151,6 +1240,291 @@ def extract_scores_for_row(analysis, row_number, all_values, client_criteria=Non
             return result
     
     return None
+
+def ensure_ai_column_header(worksheet, start_col=22, question_count=7):
+    """Ensure 'AI %' header exists in row 1 after all analysis columns"""
+    try:
+        all_values = worksheet.get_all_values()
+        headers_row = all_values[0] if all_values else []
+        
+        # Calculate AI % column position
+        # Columns: Overall Score (1) + Q1-QN (question_count) + metadata (7) = 8 + question_count
+        # Start at start_col, so AI % is at start_col + 8 + question_count
+        ai_col_index_1based = start_col + 8 + question_count
+        ai_col_index_0based = ai_col_index_1based - 1
+        
+        # Check if header exists and is correct
+        if ai_col_index_0based >= len(headers_row) or headers_row[ai_col_index_0based] != 'AI %':
+            col_letter = column_index_to_letter(ai_col_index_1based)
+            worksheet.update(values=[['AI %']], range_name=f'{col_letter}1', value_input_option='USER_ENTERED')
+            print(f"Added 'AI %' header at column {col_letter} (index {ai_col_index_1based})")
+    except Exception as e:
+        print(f"Warning: Could not ensure AI % header exists: {e}")
+
+def detect_ai_percentage_chunk(chunk_text):
+    """
+    Detect AI percentage for a single text chunk using GPT-4
+    Returns a percentage score (0-100) or None if error
+    """
+    try:
+        prompt = f"""Analyze the following text chunk and determine the probability that it was written by AI (like ChatGPT, GPT-4, etc.) versus a human.
+
+Consider these factors:
+- Writing style and naturalness (AI text is often overly formal or generic)
+- Vocabulary and sentence structure (AI often uses repetitive patterns)
+- Presence of personal anecdotes or specific details (human writing tends to have these)
+- Authenticity and personal voice (human writing has unique voice)
+- Overuse of certain phrases or structures common in AI-generated content
+
+Text to analyze:
+{chunk_text}
+
+IMPORTANT: Respond with ONLY a number between 0 and 100 representing the AI probability percentage.
+Format: Just the number, nothing else (e.g., "75" not "75%" or "AI Probability: 75%")
+If the text seems very human-written, return a low number (0-30).
+If the text seems likely AI-generated, return a high number (70-100).
+If uncertain, return a middle number (40-60).
+"""
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",  # Using gpt-4o-mini for cost efficiency
+            messages=[
+                {"role": "system", "content": "You are an expert at detecting AI-generated text. Respond with only a number between 0-100 representing AI probability percentage."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=10  # We only need a number
+        )
+        
+        result_text = response.choices[0].message.content.strip()
+        
+        # Extract number from response (handle cases where GPT adds extra text)
+        numbers = re.findall(r'\d+', result_text)
+        if numbers:
+            ai_percentage = float(numbers[0])
+            # Clamp to 0-100 range
+            ai_percentage = max(0, min(100, ai_percentage))
+            return ai_percentage
+        else:
+            # Fallback: try to parse as float directly
+            try:
+                ai_percentage = float(result_text)
+                ai_percentage = max(0, min(100, ai_percentage))
+                return ai_percentage
+            except:
+                print(f"Warning: Could not parse AI percentage from response: {result_text}")
+                return None
+                
+    except Exception as e:
+        print(f"Error in detect_ai_percentage_chunk: {e}")
+        return None
+
+def detect_ai_percentage_with_gpt4(text, split_type='sentence'):
+    """
+    Use GPT-4 to detect AI-generated text using TypeTruth's chunking approach
+    - Splits text into chunks (sentences or paragraphs)
+    - Analyzes each chunk separately
+    - Returns average AI percentage across all chunks
+    
+    Args:
+        text: Text to analyze
+        split_type: 'sentence' or 'paragraph' - how to split the text
+    
+    Returns:
+        Average AI percentage (0-100) or None if error
+    """
+    try:
+        # Minimum text length check (TypeTruth required 1000 chars, we'll be more lenient)
+        if not text or len(text.strip()) < 50:
+            print(f"Warning: Text too short for AI detection ({len(text) if text else 0} chars)")
+            return None
+        
+        # Split text into chunks based on split_type (following TypeTruth's approach)
+        if split_type == 'sentence':
+            # Split by sentences (period followed by space or newline)
+            chunks = re.split(r'[.!?]+\s+', text)
+            # Filter out empty chunks and very short chunks
+            chunks = [chunk.strip() + '.' for chunk in chunks if chunk.strip() and len(chunk.strip()) > 10]
+        elif split_type == 'paragraph':
+            # Split by paragraphs (double newlines or single newlines)
+            chunks = re.split(r'\n\s*\n+', text)
+            # Filter out empty chunks
+            chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        else:
+            # Default to sentence splitting
+            chunks = re.split(r'[.!?]+\s+', text)
+            chunks = [chunk.strip() + '.' for chunk in chunks if chunk.strip() and len(chunk.strip()) > 10]
+        
+        if not chunks:
+            # If no chunks found, analyze the whole text as one chunk
+            chunks = [text.strip()]
+        
+        print(f"Analyzing {len(chunks)} chunk(s) using {split_type} splitting...")
+        
+        # Analyze each chunk and collect scores
+        chunk_scores = []
+        for i, chunk in enumerate(chunks, 1):
+            if len(chunk.strip()) < 10:
+                continue  # Skip very short chunks
+            
+            print(f"  Analyzing chunk {i}/{len(chunks)} ({len(chunk)} chars)...")
+            chunk_score = detect_ai_percentage_chunk(chunk)
+            
+            if chunk_score is not None:
+                chunk_scores.append(chunk_score)
+                print(f"    Chunk {i} AI %: {chunk_score:.2f}%")
+            else:
+                print(f"    Chunk {i} failed to analyze")
+        
+        # Calculate average AI percentage (following TypeTruth's approach)
+        if not chunk_scores:
+            print("Warning: No chunks were successfully analyzed")
+            return None
+        
+        avg_ai_percentage = sum(chunk_scores) / len(chunk_scores)
+        print(f"Average AI percentage across {len(chunk_scores)} chunk(s): {avg_ai_percentage:.2f}%")
+        
+        return avg_ai_percentage
+                
+    except Exception as e:
+        print(f"Error in detect_ai_percentage_with_gpt4: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def detect_ai_and_write_to_sheet(selected_rows, sheet_id=None, gid=None):
+    """
+    Run AI detection on selected analyzed applications and write AI % to Google Sheets
+    Uses GPT-4 to detect AI-generated text instead of deprecated TypeTruth API
+    """
+    try:
+        spreadsheet = get_spreadsheet(sheet_id)
+        
+        # Get worksheet by gid if provided, otherwise use first sheet
+        if gid:
+            try:
+                worksheet = None
+                for sheet in spreadsheet.worksheets():
+                    if str(sheet.id) == str(gid):
+                        worksheet = sheet
+                        break
+                if not worksheet:
+                    print(f"Warning: Worksheet with gid={gid} not found, using first sheet")
+                    worksheet = spreadsheet.get_worksheet(0)
+            except Exception as e:
+                print(f"Error finding worksheet by gid: {e}, using first sheet")
+                worksheet = spreadsheet.get_worksheet(0)
+        else:
+            worksheet = spreadsheet.get_worksheet(0)
+        
+        print(f"Running AI detection on worksheet: {worksheet.title} (id: {worksheet.id})")
+        
+        all_values = worksheet.get_all_values()
+        
+        # Get OpenAI API key
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return {'error': 'OPENAI_API_KEY not found in environment variables', 'success': False}
+        
+        # Determine question count from headers (count Q columns)
+        headers = all_values[0] if all_values else []
+        question_count = 7  # default
+        if headers:
+            q_count = 0
+            for header in headers:
+                if header.startswith('Q') and header[1:].isdigit():
+                    q_count = max(q_count, int(header[1:]))
+            if q_count > 0:
+                question_count = q_count
+        
+        # Ensure AI % column header exists
+        ensure_ai_column_header(worksheet, start_col=22, question_count=question_count)
+        
+        # Calculate AI % column position
+        ai_col_index_1based = 22 + 8 + question_count  # start_col + overall_score + question_count + metadata
+        ai_col_letter = column_index_to_letter(ai_col_index_1based)
+        
+        results = []
+        failed_rows = []
+        
+        # Process each selected row
+        for row_num in selected_rows:
+            try:
+                row = all_values[row_num - 1]  # Convert to 0-indexed
+                
+                # Get text answers (columns O, P, Q - indices 14, 15, 16)
+                understanding_of_role = row[14] if len(row) > 14 else ''
+                why_edf = row[15] if len(row) > 15 else ''
+                what_stands_out = row[16] if len(row) > 16 else ''
+                
+                # Combine all text answers
+                combined_text = f"{understanding_of_role}\n\n{why_edf}\n\n{what_stands_out}".strip()
+                
+                if not combined_text or len(combined_text) < 50:
+                    print(f"Warning: Row {row_num} has insufficient text ({len(combined_text)} chars), skipping")
+                    failed_rows.append({
+                        'row': row_num,
+                        'name': f"{row[2] if len(row) > 2 else ''} {row[3] if len(row) > 3 else ''}",
+                        'error': 'Insufficient text for AI detection (minimum 50 characters required)'
+                    })
+                    continue
+                
+                # Run AI detection using GPT-4 with sentence-level chunking (TypeTruth approach)
+                print(f"Running AI detection for Row {row_num} (text length: {len(combined_text)} chars)...")
+                try:
+                    # Use sentence-level splitting like TypeTruth did for better accuracy
+                    ai_percentage = detect_ai_percentage_with_gpt4(combined_text, split_type='sentence')
+                    
+                    if ai_percentage is None:
+                        raise ValueError("Failed to get AI percentage from GPT-4")
+                    
+                    # Format as percentage string
+                    ai_percentage_str = f"{ai_percentage:.2f}%"
+                    
+                    # Write AI % to sheet
+                    worksheet.update(values=[[ai_percentage_str]], range_name=f'{ai_col_letter}{row_num}', value_input_option='USER_ENTERED')
+                    
+                    results.append({
+                        'row': row_num,
+                        'name': f"{row[2] if len(row) > 2 else ''} {row[3] if len(row) > 3 else ''}",
+                        'ai_percentage': ai_percentage_str
+                    })
+                    
+                    print(f"✅ Row {row_num}: AI % = {ai_percentage_str}")
+                    
+                except Exception as e:
+                    print(f"Error detecting AI for Row {row_num}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    failed_rows.append({
+                        'row': row_num,
+                        'name': f"{row[2] if len(row) > 2 else ''} {row[3] if len(row) > 3 else ''}",
+                        'error': str(e)
+                    })
+                    
+            except Exception as e:
+                print(f"Error processing row {row_num}: {e}")
+                import traceback
+                traceback.print_exc()
+                failed_rows.append({
+                    'row': row_num,
+                    'name': 'Unknown',
+                    'error': str(e)
+                })
+        
+        return {
+            'success': True,
+            'detected_count': len(results),
+            'failed_count': len(failed_rows),
+            'results': results,
+            'failed': failed_rows
+        }
+        
+    except Exception as e:
+        print(f"Error in detect_ai_and_write_to_sheet: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'error': str(e), 'success': False}
 
 if __name__ == "__main__":
     # Test getting unanalyzed applications
